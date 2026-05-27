@@ -11,7 +11,7 @@ builds:
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]
-    goarch: [amd64, arm64]
+    goarch: [amd64]
     ldflags:
       - -s -w
       - -X github.com/szymonrychu/tatara-cli/internal/version.Version={{ .Version }}
@@ -21,19 +21,6 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-
-brews:
-  - name: tatara
-    repository:
-      owner: szymonrychu
-      name: tap
-    homepage: https://github.com/szymonrychu/tatara-cli
-    description: "tatara platform CLI"
-    license: AGPL-3.0-or-later
-    install: |
-      bin.install "tatara"
-    test: |
-      system "#{bin}/tatara --version"
 
 checksum:
   name_template: "checksums.txt"
