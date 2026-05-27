@@ -17,7 +17,7 @@ jobs:
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v7
         with:
-          # v2.x required for go1.25+ modules (v1 chokes with "language version too low").
-          # golangci-lint-action v7+ is required to install golangci-lint v2.
-          version: v2.1.6
+          # Need golangci-lint built with go1.25+ (the toolchain we pin in go.mod).
+          # v2.1.6 was built with go1.24 and refuses to load a 1.25 module.
+          version: v2.12.2
       - run: go test -race -count=1 ./...
