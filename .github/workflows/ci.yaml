@@ -17,5 +17,6 @@ jobs:
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # v2.x required for go1.25+ modules (v1 chokes with "language version too low").
+          version: v2.1.6
       - run: go test -race -count=1 ./...
