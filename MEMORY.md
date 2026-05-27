@@ -21,9 +21,11 @@ Format: `YYYY-MM-DD - decision/finding`
 2026-05-27 - Wave 6.1 preconditions: (1) create `szymonrychu/tap` GitHub repo (`gh repo create szymonrychu/tap --public`) before pushing first `v*` tag; (2) set `HOMEBREW_TAP_GITHUB_TOKEN` secret (PAT with `repo` scope for tap repo) in tatara-cli GitHub settings.
 2026-05-27 - Release preconditions before pushing v0.1.0 tag: (1) gh repo create szymonrychu/tap --public; (2) set repo secrets HOMEBREW_TAP_GITHUB_TOKEN (PAT with repo scope on tap), HARBOR_USERNAME, HARBOR_PASSWORD (robot account with push to /containers/* on harbor.szymonrichert.pl).
 
+2026-05-27 - v0.1.0 code-complete on main: 5 subcommands wired, 13 MCP tools, full TDD coverage, CI green. Release (tag push) deferred until tap repo + secrets are in place.
+
 ## Dead-ends / things tried that did not work
 
-*(nothing yet)*
+2026-05-27 - golangci-lint-action@v6 cannot install golangci-lint v2 (must use @v7); v2.1.6 was built with go1.24 and refuses go1.25 modules; v2.12.x tightened config schema and rejects our legacy `disable-all` / `exclude-rules` / string `local-prefixes`. Stable config: golangci-lint v2.11.4 via action@v7 with `verify: false`. Fixing the config to be strict-v2-clean is a v0.1.1 boy-scout task.
 
 ## Open questions
 
