@@ -1,0 +1,27 @@
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/szymonrychu/tatara-cli/internal/auth"
+)
+
+func newLogoutCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Forget the stored OIDC token.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			path, err := auth.DefaultTokenPath()
+			if err != nil {
+				return err
+			}
+			if err := auth.DeleteToken(path); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Logged out.")
+			return nil
+		},
+	}
+}
