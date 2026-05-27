@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -227,6 +228,49 @@ func TestClient_ErrNoTokenWhenAbsent(t *testing.T) {
 func TestClient_BaseURLRequired(t *testing.T) {
 	_, err := New(Config{})
 	assert.Error(t, err)
+}
+
+func TestClient_RefreshHonorsConcurrentReload(t *testing.T) {
+	// Token is near-expiry on construction; Reload returns a freshly-refreshed
+	// token simulating a parallel process that beat us to the lock.
+	// Verify the Client uses the reloaded token and does NOT call Refresh.
+
+	nearExpiry := &auth.Token{
+		AccessToken: "stale",
+		ExpiresAt:   time.Now().Add(10 * time.Second),
+		TokenType:   "Bearer",
+	}
+	freshFromDisk := &auth.Token{
+		AccessToken: "fresh-from-disk",
+		ExpiresAt:   time.Now().Add(time.Hour),
+		TokenType:   "Bearer",
+	}
+	refreshCalled := 0
+	var seenAuth string
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	cli, err := New(Config{
+		BaseURL:   srv.URL,
+		Token:     nearExpiry,
+		TokenPath: filepath.Join(t.TempDir(), "token.json"),
+		Reload:    func() (*auth.Token, error) { return freshFromDisk, nil },
+		Refresh: func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+			refreshCalled++
+			return &auth.Token{AccessToken: "did-network-refresh", ExpiresAt: time.Now().Add(time.Hour)}, nil //nolint:gosec // test-only token literal
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := cli.Do(context.Background(), http.MethodGet, "/x", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	require.Equal(t, 0, refreshCalled, "Reload returned a fresh token; Refresh must not be called")
+	require.Equal(t, "Bearer fresh-from-disk", seenAuth)
 }
 
 func TestClient_PassesReaderBodyUnchanged(t *testing.T) {

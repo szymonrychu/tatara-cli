@@ -51,10 +51,12 @@ func newMCPCmd() *cobra.Command {
 				return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
 			}
 			cli, err := client.New(client.Config{
-				BaseURL: base,
-				Token:   token,
-				Refresh: refresh,
-				Save:    func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) },
+				BaseURL:   base,
+				Token:     token,
+				TokenPath: tokenPath,
+				Reload:    func() (*auth.Token, error) { return auth.LoadToken(tokenPath) },
+				Refresh:   refresh,
+				Save:      func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) },
 			})
 			if err != nil {
 				return err

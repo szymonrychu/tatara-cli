@@ -18,20 +18,24 @@ type RefreshFunc func(ctx context.Context, t *auth.Token) (*auth.Token, error)
 
 // Client is an HTTP client that attaches bearer tokens and auto-refreshes on near-expiry.
 type Client struct {
-	base    string
-	http    *http.Client
-	token   *auth.Token
-	refresh RefreshFunc
-	save    func(*auth.Token) error
+	base      string
+	http      *http.Client
+	token     *auth.Token
+	tokenPath string
+	refresh   RefreshFunc
+	reload    func() (*auth.Token, error)
+	save      func(*auth.Token) error
 }
 
 // Config holds constructor parameters for Client.
 type Config struct {
-	BaseURL string
-	Token   *auth.Token
-	Refresh RefreshFunc
-	Save    func(*auth.Token) error
-	HTTP    *http.Client
+	BaseURL   string
+	Token     *auth.Token
+	TokenPath string // needed for the file lock during refresh; empty skips locking
+	Refresh   RefreshFunc
+	Reload    func() (*auth.Token, error) // re-read token from disk after acquiring lock
+	Save      func(*auth.Token) error
+	HTTP      *http.Client
 }
 
 // New creates a Client from cfg. BaseURL is required.
@@ -44,11 +48,13 @@ func New(cfg Config) (*Client, error) {
 		h = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &Client{
-		base:    cfg.BaseURL,
-		http:    h,
-		token:   cfg.Token,
-		refresh: cfg.Refresh,
-		save:    cfg.Save,
+		base:      cfg.BaseURL,
+		http:      h,
+		token:     cfg.Token,
+		tokenPath: cfg.TokenPath,
+		refresh:   cfg.Refresh,
+		reload:    cfg.Reload,
+		save:      cfg.Save,
 	}, nil
 }
 
@@ -96,6 +102,22 @@ func (c *Client) ensureFresh(ctx context.Context) error {
 	}
 	if c.refresh == nil {
 		return nil
+	}
+	// Acquire file lock to serialise concurrent refresh attempts across processes.
+	if c.tokenPath != "" {
+		lock, err := auth.AcquireLock(c.tokenPath)
+		if err != nil {
+			return fmt.Errorf("client: lock token: %w", err)
+		}
+		defer func() { _ = lock.Release() }()
+		// Double-check: another process may have already refreshed while we waited.
+		if c.reload != nil {
+			fresh, err := c.reload()
+			if err == nil && fresh != nil && time.Until(fresh.ExpiresAt) > 30*time.Second {
+				c.token = fresh
+				return nil
+			}
+		}
 	}
 	nt, err := c.refresh(ctx, c.token)
 	if err != nil {
