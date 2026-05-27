@@ -17,11 +17,13 @@ tatara-memory REST 1:1. CI green.
 
 See `~/Documents/tatara/docs/superpowers/specs/2026-05-27-tatara-cli-mvp-design.md`.
 
-Release pipeline ready (goreleaser + Homebrew tap + Harbor container).
-Pushing `v0.1.0` is blocked on three preconditions documented in
-MEMORY.md: tap repo creation, `HOMEBREW_TAP_GITHUB_TOKEN`,
-`HARBOR_USERNAME`/`HARBOR_PASSWORD` secrets. The user will handle the
-actual v0.1.0 cut when those are in place.
+**Status:** code-complete on main 2026-05-27; release pipeline migrated to argo workflows.
+
+Pushing a `v*` tag now triggers tatara-go-release in the tatara ns:
+goreleaser builds amd64 binary tarballs (linux + darwin), publishes a
+github release with checksums, and pushes the linux/amd64 container
+to harbor.szymonrichert.pl/containers/tatara-cli. No outstanding
+preconditions.
 
 ## v0.1.1 - follow-ups
 

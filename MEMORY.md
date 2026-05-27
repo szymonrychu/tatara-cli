@@ -22,6 +22,7 @@ Format: `YYYY-MM-DD - decision/finding`
 2026-05-27 - Release preconditions before pushing v0.1.0 tag: (1) gh repo create szymonrychu/tap --public; (2) set repo secrets HOMEBREW_TAP_GITHUB_TOKEN (PAT with repo scope on tap), HARBOR_USERNAME, HARBOR_PASSWORD (robot account with push to /containers/* on harbor.szymonrichert.pl).
 
 2026-05-27 - v0.1.0 code-complete on main: 5 subcommands wired, 13 MCP tools, full TDD coverage, CI green. Release (tag push) deferred until tap repo + secrets are in place.
+2026-05-27 - CI/release migrated from .github/workflows to argo workflows. Push to main triggers tatara-go-ci CWT in tatara ns. Tag push (tag_pushed event) triggers tatara-go-release CWT. goreleaser config trimmed to amd64-only (linux + darwin); Homebrew tap dropped, user manages binary install manually from github release tarballs. Wave-6 preconditions in earlier MEMORY entries are SUPERSEDED: tap repo and HOMEBREW_TAP_GITHUB_TOKEN no longer required. Harbor robot creds and github status PAT live in tatara ns via tatara-argo-workflows helm release.
 
 ## Dead-ends / things tried that did not work
 
