@@ -17,6 +17,9 @@ Format: `YYYY-MM-DD - decision/finding`
 2026-05-27 - DeviceFlow.TickOverride (zero=use device-code interval) lets tests run at 1ms without changing Poll's production behaviour or API surface.
 2026-05-27 - gosec G304/G115/G117 nolint'd on intentional file-path-from-variable and uintptr->int casts; rationale in-line.
 
+2026-05-27 - GoReleaser uses `brews` key (deprecated warning but functional in v2.16); `homebrew` key does not exist in v2; `homebrew_casks` (new) requires code signing for macOS - not suitable for unsigned CLI binaries. Staying on `brews` until goreleaser adds an unsigned formula equivalent.
+2026-05-27 - Wave 6.1 preconditions: (1) create `szymonrychu/tap` GitHub repo (`gh repo create szymonrychu/tap --public`) before pushing first `v*` tag; (2) set `HOMEBREW_TAP_GITHUB_TOKEN` secret (PAT with `repo` scope for tap repo) in tatara-cli GitHub settings.
+
 ## Dead-ends / things tried that did not work
 
 *(nothing yet)*
