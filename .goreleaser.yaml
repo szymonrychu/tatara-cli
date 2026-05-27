@@ -19,7 +19,7 @@ builds:
       - -X github.com/szymonrychu/tatara-cli/internal/version.Date={{ .Date }}
 
 archives:
-  - formats: [tar.gz]
+  - format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
