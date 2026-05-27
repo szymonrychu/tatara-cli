@@ -15,8 +15,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           # v2.x required for go1.25+ modules (v1 chokes with "language version too low").
+          # golangci-lint-action v7+ is required to install golangci-lint v2.
           version: v2.1.6
       - run: go test -race -count=1 ./...
