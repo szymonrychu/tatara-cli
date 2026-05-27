@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/szymonrychu/tatara-cli/internal/version"
+	"github.com/szymonrychu/tatara-cli/internal/cmd"
 )
 
 func main() {
-	fmt.Printf("tatara %s (%s) built %s\n", version.Version, version.Commit, version.Date)
-	os.Exit(0)
+	if err := cmd.NewRootCmd().Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
 }
