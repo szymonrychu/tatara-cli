@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -107,24 +106,26 @@ func TestInvoke_SearchEntities_WithQ(t *testing.T) {
 	assert.Equal(t, "q=foo", gotRawQuery)
 }
 
-func TestInvoke_DeleteEdge_CompositeID(t *testing.T) {
+func TestInvoke_DeleteEdge_PassesOpaqueIDThrough(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
-		// net/http decodes %7C -> | in r.URL.Path; the encoding is verified by
-		// TestDeleteEdge_PathEscaping which tests Build() directly.
+		// net/http URL-decodes the path; capture it to verify the opaque ID
+		// is passed through verbatim after decoding.
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
 
+	// "YQBi" is a base64url-looking opaque ID (as returned by tatara-memory v0.2.0+).
+	const opaqueID = "YQBi"
 	c := freshClient(t, srv.URL)
 	tool := toolByName(t, "delete_edge")
-	_, err := Invoke(context.Background(), c, tool, map[string]any{"id": "a||b"})
+	_, err := Invoke(context.Background(), c, tool, map[string]any{"id": opaqueID})
 	require.NoError(t, err)
 	assert.Equal(t, http.MethodDelete, gotMethod)
-	assert.Equal(t, "/edges/a||b", gotPath)
+	assert.Equal(t, "/edges/"+opaqueID, gotPath)
 }
 
 func TestInvoke_StatusErrorSurfacedAsError(t *testing.T) {
@@ -161,13 +162,13 @@ func toolByName(t *testing.T, name string) Tool {
 	return Tool{}
 }
 
-// TestDeleteEdge_PathEscaping verifies url.PathEscape encodes pipes correctly
-// without needing a running server.
-func TestDeleteEdge_PathEscaping(t *testing.T) {
+// TestDeleteEdge_OpaqueIDInPath verifies that an opaque base64url ID is placed
+// verbatim in the URL path (url.PathEscape does not alter base64url characters).
+func TestDeleteEdge_OpaqueIDInPath(t *testing.T) {
 	tool := toolByName(t, "delete_edge")
-	_, path, _, err := tool.Build(map[string]any{"id": "a||b"})
+	_, path, _, err := tool.Build(map[string]any{"id": "YQBi"})
 	require.NoError(t, err)
-	assert.True(t, strings.HasSuffix(path, "a%7C%7Cb"), "path=%s", path)
+	assert.Equal(t, "/edges/YQBi", path)
 }
 
 // TestSearchEntities_NoQ verifies that omitting q produces a clean /entities path.

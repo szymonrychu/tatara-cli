@@ -147,8 +147,8 @@ func AllTools() []Tool {
 		},
 		{
 			Name:        "delete_edge",
-			Description: "Delete an edge by composite ID 'from||to'.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`),
+			Description: "Delete an edge by its opaque ID. Use the id returned by list_edges. Do not parse or construct the ID - the encoding is internal.",
+			Schema:      json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Opaque edge identifier returned by list_edges. Do not parse - the encoding is internal."}},"required":["id"]}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				id, _ := a["id"].(string)
 				if id == "" {
