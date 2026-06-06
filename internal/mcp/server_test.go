@@ -13,7 +13,7 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/client"
 )
 
-func TestNewServer_RegistersThirteenTools(t *testing.T) {
+func TestNewServer_RegistersAllTools(t *testing.T) {
 	tok := &auth.Token{
 		AccessToken: "test",
 		ExpiresAt:   time.Now().Add(1 * time.Hour),
