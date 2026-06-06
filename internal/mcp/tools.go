@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -236,6 +237,16 @@ func argString(a map[string]any, k string) string {
 	}
 }
 
+// argOrEnv returns the arg value if non-empty, otherwise falls back to the
+// named environment variable. This lets operator tool calls omit task= and
+// project= when the wrapper Pod has injected TATARA_TASK / TATARA_PROJECT.
+func argOrEnv(a map[string]any, key, envKey string) string {
+	if v := argString(a, key); v != "" {
+		return v
+	}
+	return os.Getenv(envKey)
+}
+
 // OperatorTools returns the 9 tatara-operator REST tools (Target=TargetOperator).
 func OperatorTools() []Tool {
 	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
@@ -250,7 +261,7 @@ func OperatorTools() []Tool {
 		op("project_get", "Get a Project by name.",
 			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				p := argString(a, "project")
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
 					return "", "", nil, fmt.Errorf("project required")
 				}
@@ -259,7 +270,7 @@ func OperatorTools() []Tool {
 		op("repo_list", "List Repositories in a Project.",
 			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				p := argString(a, "project")
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
 					return "", "", nil, fmt.Errorf("project required")
 				}
@@ -268,7 +279,7 @@ func OperatorTools() []Tool {
 		op("task_list", "List Tasks in a Project.",
 			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				p := argString(a, "project")
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
 					return "", "", nil, fmt.Errorf("project required")
 				}
@@ -277,7 +288,7 @@ func OperatorTools() []Tool {
 		op("task_get", "Get a Task by name.",
 			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				tk := argString(a, "task")
+				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}
@@ -286,7 +297,7 @@ func OperatorTools() []Tool {
 		op("task_update", "Record agent status notes on a Task (resultSummary, note).",
 			`{"type":"object","properties":{"task":{"type":"string"},"resultSummary":{"type":"string"},"note":{"type":"string"}},"required":["task"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				tk := argString(a, "task")
+				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}
@@ -302,7 +313,7 @@ func OperatorTools() []Tool {
 		op("subtask_list", "List Subtasks of a Task (sorted by order).",
 			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				tk := argString(a, "task")
+				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}
@@ -311,7 +322,7 @@ func OperatorTools() []Tool {
 		op("subtask_create", "Create a Subtask under a Task (agent self-planning).",
 			`{"type":"object","properties":{"task":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"},"order":{"type":"integer"}},"required":["task","title"]}`,
 			func(a map[string]any) (string, string, any, error) {
-				tk := argString(a, "task")
+				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}

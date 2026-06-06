@@ -74,6 +74,39 @@ func TestOperatorTools_Invoke(t *testing.T) {
 	require.Contains(t, string(body), "taskRef")
 }
 
+func TestOperatorTools_EnvFallback(t *testing.T) {
+	t.Setenv("TATARA_TASK", "task-from-env")
+	t.Setenv("TATARA_PROJECT", "proj-from-env")
+
+	cases := []struct {
+		tool string
+		args map[string]any
+		path string
+	}{
+		{"task_get", map[string]any{}, "/tasks/task-from-env"},
+		{"task_update", map[string]any{"resultSummary": "ok"}, "/tasks/task-from-env"},
+		{"subtask_list", map[string]any{}, "/tasks/task-from-env/subtasks"},
+		{"subtask_create", map[string]any{"title": "step"}, "/tasks/task-from-env/subtasks"},
+		{"task_list", map[string]any{}, "/projects/proj-from-env/tasks"},
+		{"repo_list", map[string]any{}, "/projects/proj-from-env/repositories"},
+		{"project_get", map[string]any{}, "/projects/proj-from-env"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			_, p, _, err := operatorToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
+	t.Setenv("TATARA_TASK", "env-task")
+	_, p, _, err := operatorToolByName(t, "task_get").Build(map[string]any{"task": "explicit-task"})
+	require.NoError(t, err)
+	require.Equal(t, "/tasks/explicit-task", p)
+}
+
 func TestAllOperatorTools_Count(t *testing.T) {
 	require.Len(t, OperatorTools(), 9)
 }
