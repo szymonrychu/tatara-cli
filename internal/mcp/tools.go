@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
@@ -156,6 +157,70 @@ func AllTools() []Tool {
 				return http.MethodDelete, "/edges/" + url.PathEscape(id), nil, nil
 			},
 		},
+		{Name: "code_search", Description: "Search code-graph entities by name/description, optional type filter.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"q":{"type":"string"},"type":{"type":"string"},"limit":{"type":"integer"}},"required":["repo"]}`),
+			Build:  codeGet("/code/entities", []string{"repo"}, []string{"q", "type", "limit"})},
+		{Name: "code_entity", Description: "Get a single code entity and its immediate edges.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/entity", []string{"repo", "id"}, nil)},
+		{Name: "code_neighbors", Description: "Traverse the code graph from an entity along a relation.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"relation":{"type":"string"},"direction":{"type":"string","enum":["out","in"]},"depth":{"type":"integer"}},"required":["repo","id","relation"]}`),
+			Build:  codeGet("/code/neighbors", []string{"repo", "id", "relation"}, []string{"direction", "depth"})},
+		{Name: "code_callers", Description: "Who calls this function/method (reverse calls), to depth N.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/callers", []string{"repo", "id"}, []string{"depth"})},
+		{Name: "code_callees", Description: "What this function/method calls (forward calls), to depth N.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/callees", []string{"repo", "id"}, []string{"depth"})},
+		{Name: "code_dependents", Description: "What depends on this entity (reverse imports/references/depends_on).",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/dependents", []string{"repo", "id"}, []string{"depth"})},
+		{Name: "code_dependencies", Description: "What this entity depends on (forward imports/references/depends_on).",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/dependencies", []string{"repo", "id"}, []string{"depth"})},
+		{Name: "code_file_imports", Description: "Imports out of a file's package.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"path":{"type":"string"}},"required":["repo","path"]}`),
+			Build:  codeGet("/code/file-imports", []string{"repo", "path"}, nil)},
+		{Name: "code_resource_graph", Description: "Terraform/Helm dependency subgraph for a resource.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/resource-graph", []string{"repo", "id"}, []string{"depth"})},
+	}
+}
+
+// codeGet builds a GET tool path with an encoded query, requiring the given keys.
+func codeGet(path string, required []string, optional []string) func(map[string]any) (string, string, any, error) {
+	return func(a map[string]any) (string, string, any, error) {
+		q := url.Values{}
+		for _, k := range required {
+			v := argString(a, k)
+			if v == "" {
+				return "", "", nil, fmt.Errorf("%s required", k)
+			}
+			q.Set(k, v)
+		}
+		for _, k := range optional {
+			if v := argString(a, k); v != "" {
+				q.Set(k, v)
+			}
+		}
+		return http.MethodGet, path + "?" + q.Encode(), nil, nil
+	}
+}
+
+// argString coerces string or JSON number args to a string.
+func argString(a map[string]any, k string) string {
+	switch v := a[k].(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(v)
+	default:
+		return ""
 	}
 }
 

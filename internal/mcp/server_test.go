@@ -21,11 +21,11 @@ func TestNewServer_RegistersThirteenTools(t *testing.T) {
 	c, err := client.New(client.Config{BaseURL: "http://localhost:9999", Token: tok})
 	require.NoError(t, err)
 
-	// Must not panic; all 13 tools register without error.
+	// Must not panic; all 22 tools register without error.
 	srv := NewServer(c, slog.Default())
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
 	// Cross-check: tool count matches registry.
-	assert.Len(t, AllTools(), 13)
+	assert.Len(t, AllTools(), 22)
 }
