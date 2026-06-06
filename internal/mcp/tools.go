@@ -21,7 +21,7 @@ type Tool struct {
 	Build       func(args map[string]any) (method, path string, body any, err error)
 }
 
-// AllTools returns the 13-entry tool registry mapping tatara-memory REST endpoints.
+// AllTools returns the 23-entry tool registry mapping tatara-memory REST endpoints.
 func AllTools() []Tool {
 	return []Tool{
 		{
@@ -184,6 +184,9 @@ func AllTools() []Tool {
 		{Name: "code_resource_graph", Description: "Terraform/Helm dependency subgraph for a resource.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
 			Build:  codeGet("/code/resource-graph", []string{"repo", "id"}, []string{"depth"})},
+		{Name: "code_cross_repo", Description: "Cross-repo symbol links for an entity: who consumes what it provides and who provides what it requires.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/cross-repo", []string{"repo", "id"}, nil)},
 	}
 }
 

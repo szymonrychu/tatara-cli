@@ -27,5 +27,5 @@ func TestNewServer_RegistersThirteenTools(t *testing.T) {
 	assert.NotNil(t, srv.srv)
 
 	// Cross-check: tool count matches registry.
-	assert.Len(t, AllTools(), 22)
+	assert.Len(t, AllTools(), 23)
 }
