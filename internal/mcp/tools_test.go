@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 }
 
 func TestAllTools_ThirteenEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 13)
+	assert.Len(t, AllTools(), 22)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -175,4 +176,51 @@ func TestSearchEntities_NoQ(t *testing.T) {
 	_, path, _, err := tool.Build(map[string]any{})
 	require.NoError(t, err)
 	assert.Equal(t, "/entities", path)
+}
+
+func TestCodeTools_BuildQueries(t *testing.T) {
+	cases := []struct {
+		tool string
+		args map[string]any
+		path string            // expected URL.Path
+		q    map[string]string // expected query params
+	}{
+		{"code_search", map[string]any{"repo": "r", "q": "x", "type": "go_func", "limit": float64(10)}, "/code/entities", map[string]string{"repo": "r", "q": "x", "type": "go_func", "limit": "10"}},
+		{"code_entity", map[string]any{"repo": "r", "id": "go:func:m.F"}, "/code/entity", map[string]string{"repo": "r", "id": "go:func:m.F"}},
+		{"code_neighbors", map[string]any{"repo": "r", "id": "x", "relation": "calls", "direction": "out", "depth": float64(2)}, "/code/neighbors", map[string]string{"repo": "r", "id": "x", "relation": "calls", "direction": "out", "depth": "2"}},
+		{"code_callers", map[string]any{"repo": "r", "id": "x", "depth": float64(3)}, "/code/callers", map[string]string{"repo": "r", "id": "x", "depth": "3"}},
+		{"code_callees", map[string]any{"repo": "r", "id": "x"}, "/code/callees", map[string]string{"repo": "r", "id": "x"}},
+		{"code_dependents", map[string]any{"repo": "r", "id": "x"}, "/code/dependents", map[string]string{"repo": "r", "id": "x"}},
+		{"code_dependencies", map[string]any{"repo": "r", "id": "x"}, "/code/dependencies", map[string]string{"repo": "r", "id": "x"}},
+		{"code_file_imports", map[string]any{"repo": "r", "path": "a/b.go"}, "/code/file-imports", map[string]string{"repo": "r", "path": "a/b.go"}},
+		{"code_resource_graph", map[string]any{"repo": "r", "id": "x", "depth": float64(1)}, "/code/resource-graph", map[string]string{"repo": "r", "id": "x", "depth": "1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, c.tool), c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.path, gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k))
+			}
+		})
+	}
+}
+
+func TestCodeTools_RequireArgs(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_entity").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
+	_, _, _, err = toolByName(t, "code_search").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_neighbors").Build(map[string]any{"repo": "r", "id": "x"})
+	require.Error(t, err) // relation required
 }
