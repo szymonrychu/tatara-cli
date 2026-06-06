@@ -12,24 +12,40 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/version"
 )
 
-// Server wraps an mcp-go MCPServer and dispatches tool calls via the HTTP client.
+// Server wraps an mcp-go MCPServer and dispatches tool calls via the HTTP clients.
 type Server struct {
-	srv    *server.MCPServer
-	client *client.Client
-	log    *slog.Logger
+	srv      *server.MCPServer
+	memory   *client.Client
+	operator *client.Client
+	log      *slog.Logger
 }
 
-// NewServer creates an MCP server that registers all 13 tatara-memory tools.
-func NewServer(c *client.Client, log *slog.Logger) *Server {
+// NewServer registers the tatara-memory tools (against memory) and the
+// tatara-operator tools (against operator).
+func NewServer(memory, operator *client.Client, log *slog.Logger) *Server {
 	s := &Server{
-		srv:    server.NewMCPServer("tatara", version.Version, server.WithToolCapabilities(true)),
-		client: c,
-		log:    log,
+		srv:      server.NewMCPServer("tatara", version.Version, server.WithToolCapabilities(true)),
+		memory:   memory,
+		operator: operator,
+		log:      log,
 	}
 	for _, t := range AllTools() {
 		s.register(t)
 	}
+	for _, t := range OperatorTools() {
+		s.register(t)
+	}
 	return s
+}
+
+// ToolCount returns the number of registered tools (test/observability helper).
+func (s *Server) ToolCount() int { return len(AllTools()) + len(OperatorTools()) }
+
+func (s *Server) clientFor(t Tool) *client.Client {
+	if t.Target == TargetOperator {
+		return s.operator
+	}
+	return s.memory
 }
 
 func (s *Server) register(t Tool) {
@@ -40,7 +56,7 @@ func (s *Server) register(t Tool) {
 	)
 	s.srv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		args := req.GetArguments()
-		body, err := Invoke(ctx, s.client, t, args)
+		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		if err != nil {
 			s.log.Error("tool error", "tool", t.Name, "err", err)
 			return mcplib.NewToolResultError(err.Error()), nil

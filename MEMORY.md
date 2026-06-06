@@ -28,3 +28,5 @@ Format: `YYYY-MM-DD - decision/finding`
 ## Open questions
 
 *(nothing yet)*
+
+2026-06-06 - **Operator MCP tools.** Added 9-tool group (project/repo/task/subtask) targeting tatara-operator REST API. `Tool` now carries `Target` (TargetMemory|TargetOperator); `Server` holds two clients (memory + operator) and dispatches by target. Operator base URL resolves flag > env(TATARA_OPERATOR_URL) > file(operatorBaseUrl yaml key) > default (https://tatara.szymonrichert.pl/api/v1/operator). Single OIDC token assumed to carry both tatara-memory and tatara-operator audiences (Keycloak audience mapper added in operator M6); revisit if a separate audience-scoped token flow is needed. Ships as tatara-cli v0.4.0.

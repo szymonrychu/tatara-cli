@@ -67,3 +67,10 @@ func TestDefaultConfigPath_FallsBackToHomeDir(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	assert.Equal(t, filepath.Join(home, ".config", "tatara", "config.yaml"), got)
 }
+
+func TestResolveOperatorBaseURL_Precedence(t *testing.T) {
+	require.Equal(t, "https://flag", ResolveOperatorBaseURL("https://flag", "https://env", &FileConfig{OperatorBaseURL: "https://file"}))
+	require.Equal(t, "https://env", ResolveOperatorBaseURL("", "https://env", &FileConfig{OperatorBaseURL: "https://file"}))
+	require.Equal(t, "https://file", ResolveOperatorBaseURL("", "", &FileConfig{OperatorBaseURL: "https://file"}))
+	require.Equal(t, DefaultOperatorBaseURL, ResolveOperatorBaseURL("", "", &FileConfig{}))
+}
