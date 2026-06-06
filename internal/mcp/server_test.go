@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -21,11 +22,18 @@ func TestNewServer_RegistersThirteenTools(t *testing.T) {
 	c, err := client.New(client.Config{BaseURL: "http://localhost:9999", Token: tok})
 	require.NoError(t, err)
 
-	// Must not panic; all 22 tools register without error.
-	srv := NewServer(c, slog.Default())
+	// Must not panic; all tools register without error.
+	srv := NewServer(c, c, slog.Default())
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
 	// Cross-check: tool count matches registry.
 	assert.Len(t, AllTools(), 23)
+}
+
+func TestNewServer_RegistersMemoryAndOperatorTools(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	s := NewServer(mem, op, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.Equal(t, len(AllTools())+len(OperatorTools()), s.ToolCount())
 }

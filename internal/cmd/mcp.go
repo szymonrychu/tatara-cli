@@ -16,7 +16,7 @@ import (
 )
 
 func newMCPCmd() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "mcp",
 		Short: "Run the tatara MCP server over stdio.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -61,10 +61,27 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			srv := mcp.NewServer(cli, logger)
+
+			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
+			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
+			opCli, err := client.New(client.Config{
+				BaseURL:   opBase,
+				Token:     token,
+				TokenPath: tokenPath,
+				Reload:    func() (*auth.Token, error) { return auth.LoadToken(tokenPath) },
+				Refresh:   refresh,
+				Save:      func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) },
+			})
+			if err != nil {
+				return err
+			}
+
+			srv := mcp.NewServer(cli, opCli, logger)
 			return srv.Run(ctx)
 		},
 	}
+	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
+	return c
 }
 
 func mcpLogger() (*slog.Logger, io.Closer, error) {
