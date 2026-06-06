@@ -10,9 +10,12 @@ import (
 
 const DefaultBaseURL = "https://tatara.szymonrichert.pl/api/v1/memory"
 
+const DefaultOperatorBaseURL = "https://tatara.szymonrichert.pl/api/v1/operator"
+
 type FileConfig struct {
-	BaseURL string `yaml:"baseUrl"`
-	Issuer  string `yaml:"issuer"`
+	BaseURL         string `yaml:"baseUrl"`
+	OperatorBaseURL string `yaml:"operatorBaseUrl"`
+	Issuer          string `yaml:"issuer"`
 }
 
 // ResolveBaseURL returns the first non-empty value of: flag, env, file, default.
@@ -27,6 +30,20 @@ func ResolveBaseURL(flag, env string, file *FileConfig) string {
 		return file.BaseURL
 	}
 	return DefaultBaseURL
+}
+
+// ResolveOperatorBaseURL returns the first non-empty of: flag, env, file, default.
+func ResolveOperatorBaseURL(flag, env string, file *FileConfig) string {
+	if flag != "" {
+		return flag
+	}
+	if env != "" {
+		return env
+	}
+	if file != nil && file.OperatorBaseURL != "" {
+		return file.OperatorBaseURL
+	}
+	return DefaultOperatorBaseURL
 }
 
 func DefaultConfigPath() (string, error) {
