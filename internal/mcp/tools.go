@@ -13,11 +13,20 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/client"
 )
 
-// Tool describes one tatara-memory REST operation exposed as an MCP tool.
+// Target identifies which backend client a Tool is dispatched against.
+type Target int
+
+const (
+	TargetMemory   Target = iota // default: existing tools hit tatara-memory
+	TargetOperator               // operator tools hit tatara-operator
+)
+
+// Tool describes a tatara REST operation exposed as an MCP tool.
 type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	Target      Target
 	Build       func(args map[string]any) (method, path string, body any, err error)
 }
 
@@ -224,6 +233,115 @@ func argString(a map[string]any, k string) string {
 		return strconv.Itoa(v)
 	default:
 		return ""
+	}
+}
+
+// OperatorTools returns the 9 tatara-operator REST tools (Target=TargetOperator).
+func OperatorTools() []Tool {
+	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
+		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetOperator, Build: build}
+	}
+	return []Tool{
+		op("project_list", "List all Projects.",
+			`{"type":"object","properties":{}}`,
+			func(a map[string]any) (string, string, any, error) {
+				return http.MethodGet, "/projects", nil, nil
+			}),
+		op("project_get", "Get a Project by name.",
+			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argString(a, "project")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				return http.MethodGet, "/projects/" + url.PathEscape(p), nil, nil
+			}),
+		op("repo_list", "List Repositories in a Project.",
+			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argString(a, "project")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				return http.MethodGet, "/projects/" + url.PathEscape(p) + "/repositories", nil, nil
+			}),
+		op("task_list", "List Tasks in a Project.",
+			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argString(a, "project")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				return http.MethodGet, "/projects/" + url.PathEscape(p) + "/tasks", nil, nil
+			}),
+		op("task_get", "Get a Task by name.",
+			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argString(a, "task")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				return http.MethodGet, "/tasks/" + url.PathEscape(tk), nil, nil
+			}),
+		op("task_update", "Record agent status notes on a Task (resultSummary, note).",
+			`{"type":"object","properties":{"task":{"type":"string"},"resultSummary":{"type":"string"},"note":{"type":"string"}},"required":["task"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argString(a, "task")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				body := map[string]any{}
+				if v, ok := a["resultSummary"]; ok {
+					body["resultSummary"] = v
+				}
+				if v, ok := a["note"]; ok {
+					body["note"] = v
+				}
+				return http.MethodPatch, "/tasks/" + url.PathEscape(tk), body, nil
+			}),
+		op("subtask_list", "List Subtasks of a Task (sorted by order).",
+			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argString(a, "task")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				return http.MethodGet, "/tasks/" + url.PathEscape(tk) + "/subtasks", nil, nil
+			}),
+		op("subtask_create", "Create a Subtask under a Task (agent self-planning).",
+			`{"type":"object","properties":{"task":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"},"order":{"type":"integer"}},"required":["task","title"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argString(a, "task")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "title") == "" {
+					return "", "", nil, fmt.Errorf("title required")
+				}
+				body := map[string]any{"title": a["title"]}
+				if v, ok := a["detail"]; ok {
+					body["detail"] = v
+				}
+				if v, ok := a["order"]; ok {
+					body["order"] = v
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/subtasks", body, nil
+			}),
+		op("subtask_update", "Update a Subtask status (phase, result, turnId).",
+			`{"type":"object","properties":{"subtask":{"type":"string"},"phase":{"type":"string"},"result":{"type":"string"},"turnId":{"type":"string"}},"required":["subtask"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				st := argString(a, "subtask")
+				if st == "" {
+					return "", "", nil, fmt.Errorf("subtask required")
+				}
+				body := map[string]any{}
+				for _, k := range []string{"phase", "result", "turnId"} {
+					if v, ok := a[k]; ok {
+						body[k] = v
+					}
+				}
+				return http.MethodPatch, "/subtasks/" + url.PathEscape(st), body, nil
+			}),
 	}
 }
 

@@ -16,6 +16,85 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/client"
 )
 
+func TestOperatorTools_BuildPaths(t *testing.T) {
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		method string
+		path   string
+	}{
+		{"project_list", map[string]any{}, http.MethodGet, "/projects"},
+		{"project_get", map[string]any{"project": "alpha"}, http.MethodGet, "/projects/alpha"},
+		{"repo_list", map[string]any{"project": "alpha"}, http.MethodGet, "/projects/alpha/repositories"},
+		{"task_list", map[string]any{"project": "alpha"}, http.MethodGet, "/projects/alpha/tasks"},
+		{"task_get", map[string]any{"task": "t1"}, http.MethodGet, "/tasks/t1"},
+		{"task_update", map[string]any{"task": "t1", "resultSummary": "x"}, http.MethodPatch, "/tasks/t1"},
+		{"subtask_list", map[string]any{"task": "t1"}, http.MethodGet, "/tasks/t1/subtasks"},
+		{"subtask_create", map[string]any{"task": "t1", "title": "step"}, http.MethodPost, "/tasks/t1/subtasks"},
+		{"subtask_update", map[string]any{"subtask": "s1", "phase": "Done"}, http.MethodPatch, "/subtasks/s1"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			m, p, _, err := operatorToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.method, m)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestOperatorTools_RequireArgs(t *testing.T) {
+	_, _, _, err := operatorToolByName(t, "project_get").Build(map[string]any{})
+	require.Error(t, err) // project required
+	_, _, _, err = operatorToolByName(t, "task_get").Build(map[string]any{})
+	require.Error(t, err) // task required
+	_, _, _, err = operatorToolByName(t, "subtask_create").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // title required
+	_, _, _, err = operatorToolByName(t, "subtask_update").Build(map[string]any{})
+	require.Error(t, err) // subtask required
+}
+
+func TestOperatorTools_Invoke(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"s1","taskRef":"t1"}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	body, err := Invoke(context.Background(), c, operatorToolByName(t, "subtask_create"),
+		map[string]any{"task": "t1", "title": "step", "detail": "d", "order": float64(1)})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, gotMethod)
+	require.Equal(t, "/tasks/t1/subtasks", gotPath)
+	require.Equal(t, "step", gotBody["title"])
+	require.Contains(t, string(body), "taskRef")
+}
+
+func TestAllOperatorTools_Count(t *testing.T) {
+	require.Len(t, OperatorTools(), 9)
+}
+
+func TestOperatorTools_TargetIsOperator(t *testing.T) {
+	for _, tl := range OperatorTools() {
+		require.Equal(t, TargetOperator, tl.Target)
+	}
+}
+
+func operatorToolByName(t *testing.T, name string) Tool {
+	t.Helper()
+	for _, tl := range OperatorTools() {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("operator tool %q not found", name)
+	return Tool{}
+}
+
 // freshClient returns a Client pointed at the given base URL with a valid token.
 func freshClient(t *testing.T, baseURL string) *client.Client {
 	t.Helper()
