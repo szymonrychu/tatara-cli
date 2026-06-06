@@ -31,7 +31,7 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 }
 
 func TestAllTools_ThirteenEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 22)
+	assert.Len(t, AllTools(), 23)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -194,6 +194,7 @@ func TestCodeTools_BuildQueries(t *testing.T) {
 		{"code_dependencies", map[string]any{"repo": "r", "id": "x"}, "/code/dependencies", map[string]string{"repo": "r", "id": "x"}},
 		{"code_file_imports", map[string]any{"repo": "r", "path": "a/b.go"}, "/code/file-imports", map[string]string{"repo": "r", "path": "a/b.go"}},
 		{"code_resource_graph", map[string]any{"repo": "r", "id": "x", "depth": float64(1)}, "/code/resource-graph", map[string]string{"repo": "r", "id": "x", "depth": "1"}},
+		{"code_cross_repo", map[string]any{"repo": "r", "id": "x"}, "/code/cross-repo", map[string]string{"repo": "r", "id": "x"}},
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
@@ -223,4 +224,6 @@ func TestCodeTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // repo required
 	_, _, _, err = toolByName(t, "code_neighbors").Build(map[string]any{"repo": "r", "id": "x"})
 	require.Error(t, err) // relation required
+	_, _, _, err = toolByName(t, "code_cross_repo").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
 }
