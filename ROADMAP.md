@@ -25,6 +25,17 @@ github release with checksums, and pushes the linux/amd64 container
 to harbor.szymonrichert.pl/containers/tatara-cli. No outstanding
 preconditions.
 
+## v0.4.0 - operator MCP tool group
+
+**Status:** code-complete on feat/operator-mcp-tools 2026-06-06, pending v0.4.0 tag + release.
+
+9 MCP tools (project_list, project_get, repo_list, task_list, task_get, task_update,
+subtask_list, subtask_create, subtask_update) mapping tatara-operator REST API 1:1.
+Dual-client MCP server; operator URL/audience wiring via flag/env/file/default.
+OIDC single-token assumption (both audiences carried by one token); Keycloak mapper in M6.
+
+See `~/Documents/tatara/docs/superpowers/plans/2026-06-06-tatara-operator-m3-restapi-cli-tools.md`.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned
