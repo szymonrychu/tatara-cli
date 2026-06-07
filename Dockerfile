@@ -6,7 +6,7 @@ FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
@@ -27,6 +27,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/tatara
 
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /out/tatara /tatara
+COPY --from=builder /out/tatara /usr/local/bin/tatara
 USER nonroot:nonroot
-ENTRYPOINT ["/tatara"]
+ENTRYPOINT ["/usr/local/bin/tatara"]
