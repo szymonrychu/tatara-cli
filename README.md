@@ -22,6 +22,12 @@ tatara raw GET /memories
 
 # start the MCP stdio server (for Claude Code integration)
 tatara mcp
+
+# write an MCP server config into the given directory
+tatara mcp-config ~/.config/claude
+
+# clear stored credentials
+tatara logout
 ```
 
 ## Build from source
