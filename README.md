@@ -33,3 +33,7 @@ make build          # binary at bin/tatara
 make test           # unit tests
 make lint           # golangci-lint
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build, test, and lint instructions.
