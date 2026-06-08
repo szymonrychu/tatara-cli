@@ -22,6 +22,12 @@ tatara raw GET /memories
 
 # start the MCP stdio server (for Claude Code integration)
 tatara mcp
+
+# write or merge a .mcp.json entry registering tatara in a directory
+tatara mcp-config .
+
+# forget the stored OIDC token
+tatara logout
 ```
 
 ## Build from source
