@@ -17,11 +17,17 @@ brew install tatara
 # authenticate (OIDC device flow)
 tatara login
 
+# clear stored credentials
+tatara logout
+
 # call any tatara-memory endpoint
 tatara raw GET /memories
 
 # start the MCP stdio server (for Claude Code integration)
 tatara mcp
+
+# write Claude Code MCP config into a directory
+tatara mcp-config ./.claude
 ```
 
 ## Build from source
