@@ -142,8 +142,8 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 	return c
 }
 
-func TestAllTools_TwentyEightEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 28)
+func TestAllTools_ThirtyFourEntries(t *testing.T) {
+	assert.Len(t, AllTools(), 34)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -342,9 +342,9 @@ func TestCodeTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // id required
 }
 
-// TestAllTools_Count verifies the tool registry grows to 28 after Phase 1 additions.
+// TestAllTools_Count verifies the tool registry grows to 34 after Phase 2 additions.
 func TestAllTools_Count(t *testing.T) {
-	assert.Len(t, AllTools(), 28)
+	assert.Len(t, AllTools(), 34)
 }
 
 func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
@@ -473,4 +473,232 @@ func TestConfidenceParams_ForwardedAsQueryParams(t *testing.T) {
 			require.Equal(t, "HIGH", gotQuery.Get("tier"), "tool %s: tier", name)
 		})
 	}
+}
+
+func TestCodeRelated_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{
+			"all params",
+			map[string]any{"id": "go:func:m.F", "relations": "conceptually_related_to,cites", "min_confidence": float64(0.5), "repo": "r"},
+			map[string]string{"id": "go:func:m.F", "relations": "conceptually_related_to,cites", "min_confidence": "0.5", "repo": "r"},
+		},
+		{
+			"id only",
+			map[string]any{"id": "go:func:m.F"},
+			map[string]string{"id": "go:func:m.F"},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_related"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/related", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeRelated_RequireID(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_related").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
+}
+
+func TestCodeHyperedges_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"entity and repo", map[string]any{"entity": "go:func:m.F", "repo": "r"}, map[string]string{"entity": "go:func:m.F", "repo": "r"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedges"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/hyperedges", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeHyperedge_BuildQuery(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedge"), map[string]any{"id": "he:r:file:label", "repo": "r"})
+	require.NoError(t, err)
+	require.Equal(t, "/code-graph/hyperedge", gotPath)
+	require.Equal(t, "he:r:file:label", gotQuery.Get("id"))
+	require.Equal(t, "r", gotQuery.Get("repo"))
+}
+
+func TestCodeHyperedge_RequireID(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
+}
+
+func TestCodeCommunities_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"repo", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_communities"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/communities", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeCommunity_BuildQuery(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_community"), map[string]any{"repo": "r", "community": float64(3)})
+	require.NoError(t, err)
+	require.Equal(t, "/code-graph/community", gotPath)
+	require.Equal(t, "r", gotQuery.Get("repo"))
+	require.Equal(t, "3", gotQuery.Get("community"))
+}
+
+func TestCodeCommunity_RequireArgs(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_community").Build(map[string]any{"community": float64(1)})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_community").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // community required
+}
+
+func TestCodeBridges_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"repo and limit", map[string]any{"repo": "r", "limit": float64(5)}, map[string]string{"repo": "r", "limit": "5"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_bridges"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/bridges", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeImportant_ByParam(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"by betweenness", map[string]any{"repo": "r", "by": "betweenness", "limit": float64(10)}, map[string]string{"repo": "r", "by": "betweenness", "limit": "10"}},
+		{"by degree", map[string]any{"by": "degree"}, map[string]string{"by": "degree"}},
+		{"no by", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_important"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/important", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeImportant_NoByParam_NotForwarded(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_important"), map[string]any{"repo": "r"})
+	require.NoError(t, err)
+	require.False(t, gotQuery.Has("by"), "by must not be forwarded when absent")
 }

@@ -31,7 +31,7 @@ type Tool struct {
 	Build       func(args map[string]any) (method, path string, body any, err error)
 }
 
-// AllTools returns the 28-entry tool registry mapping tatara-memory REST endpoints.
+// AllTools returns the 34-entry tool registry mapping tatara-memory REST endpoints.
 func AllTools() []Tool {
 	return []Tool{
 		{
@@ -200,9 +200,9 @@ func AllTools() []Tool {
 		{Name: "code_path", Description: "Shortest path between two code entities in the code graph.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"relations":{"type":"string"},"max_depth":{"type":"integer"}},"required":["from","to"]}`),
 			Build:  codeGet("/code-graph/path", []string{"from", "to"}, []string{"repo", "relations", "max_depth"})},
-		{Name: "code_important", Description: "Most important (highest-degree) entities in the code graph, optionally filtered by repo.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
-			Build:  codeGet("/code-graph/important", nil, []string{"repo", "limit"})},
+		{Name: "code_important", Description: "Most important entities in the code graph, ranked by 'by' (degree default, or betweenness from persisted analytics), optionally filtered by repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"},"by":{"type":"string","enum":["degree","betweenness"]}}}`),
+			Build:  codeGet("/code-graph/important", nil, []string{"repo", "limit", "by"})},
 		{Name: "code_stats", Description: "Graph statistics: entity/edge counts, types, tiers, isolated entities, import cycles.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
 			Build:  codeGet("/code-graph/stats", nil, []string{"repo"})},
@@ -212,6 +212,24 @@ func AllTools() []Tool {
 		{Name: "code_explain", Description: "Full context for a code entity: detail, in/out neighbors with file locations.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
 			Build:  codeGet("/code-graph/explain", []string{"id"}, []string{"repo"})},
+		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), optionally filtered by relation and min confidence.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id"]}`),
+			Build:  codeGet("/code-graph/related", []string{"id"}, []string{"relations", "min_confidence", "repo"})},
+		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity and/or repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}}}`),
+			Build:  codeGet("/code-graph/hyperedges", nil, []string{"entity", "repo"})},
+		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
+			Build:  codeGet("/code-graph/hyperedge", []string{"id"}, []string{"repo"})},
+		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), optionally filtered by repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
+			Build:  codeGet("/code-graph/communities", nil, []string{"repo"})},
+		{Name: "code_community", Description: "List the member entities of a specific community.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer"}},"required":["repo","community"]}`),
+			Build:  codeGet("/code-graph/community", []string{"repo", "community"}, nil)},
+		{Name: "code_bridges", Description: "High-betweenness entities that connect more than one community (graph bridges), ranked, optionally filtered by repo and limited.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
+			Build:  codeGet("/code-graph/bridges", nil, []string{"repo", "limit"})},
 	}
 }
 
