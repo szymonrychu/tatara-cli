@@ -109,7 +109,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 9)
+	require.Len(t, OperatorTools(), 12)
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
