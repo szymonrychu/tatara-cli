@@ -725,6 +725,48 @@ func TestOperatorTools_SCMBuildPaths(t *testing.T) {
 	}
 }
 
+func TestOperatorTools_SCMRequireArgs(t *testing.T) {
+	_, _, _, err := operatorToolByName(t, "propose_issue").Build(map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"})
+	require.Error(t, err) // project required (no env set)
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "title": "t", "body": "b", "kind": "bug"})
+	require.Error(t, err) // repo required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "body": "b", "kind": "bug"})
+	require.Error(t, err) // title required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "title": "t", "kind": "bug"})
+	require.Error(t, err) // body required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "title": "t", "body": "b"})
+	require.Error(t, err) // kind required
+	_, _, _, err = operatorToolByName(t, "review_verdict").Build(map[string]any{"decision": "approve"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "review_verdict").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // decision required
+	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"action": "merge"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // action required
+}
+
+func TestOperatorTools_SCMEnvFallback(t *testing.T) {
+	t.Setenv("TATARA_TASK", "task-from-env")
+	t.Setenv("TATARA_PROJECT", "proj-from-env")
+	cases := []struct {
+		tool string
+		args map[string]any
+		path string
+	}{
+		{"propose_issue", map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"}, "/projects/proj-from-env/issues"},
+		{"review_verdict", map[string]any{"decision": "comment"}, "/tasks/task-from-env/review"},
+		{"pr_outcome", map[string]any{"action": "merge"}, "/tasks/task-from-env/pr-outcome"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			_, p, _, err := operatorToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
 func TestOperatorTools_SCMBodies(t *testing.T) {
 	t.Run("propose_issue", func(t *testing.T) {
 		_, _, body, err := operatorToolByName(t, "propose_issue").Build(map[string]any{
