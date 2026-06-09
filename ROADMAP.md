@@ -36,6 +36,15 @@ OIDC single-token assumption (both audiences carried by one token); Keycloak map
 
 See `~/Documents/tatara/docs/superpowers/plans/2026-06-06-tatara-operator-m3-restapi-cli-tools.md`.
 
+## v0.5.0 - SCM intent MCP tools
+
+**Status:** shipped
+
+3 operator intent tools (propose_issue, review_verdict, pr_outcome) per
+the SCM-projects contract lock. See
+`~/Documents/tatara/docs/superpowers/plans/2026-06-09-scm-projects-cli.md`
+and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned
