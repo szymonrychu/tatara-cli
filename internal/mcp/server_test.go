@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
@@ -36,4 +37,16 @@ func TestNewServer_RegistersMemoryAndOperatorTools(t *testing.T) {
 	op := freshClient(t, "http://operator.invalid")
 	s := NewServer(mem, op, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.Equal(t, len(AllTools())+len(OperatorTools()), s.ToolCount())
+}
+
+// TestBuildTool_Marshals reproduces the tools/list serialization the MCP
+// server performs. NewTool seeds a default InputSchema while we also supply a
+// RawInputSchema; mcp-go's MarshalJSON rejects having both, which silently
+// broke the whole tools/list response (only the first offending tool was
+// reported). buildTool must clear the seeded schema so every tool marshals.
+func TestBuildTool_Marshals(t *testing.T) {
+	for _, tl := range append(AllTools(), OperatorTools()...) {
+		_, err := json.Marshal(buildTool(tl))
+		require.NoErrorf(t, err, "tool %s must marshal for tools/list", tl.Name)
+	}
 }

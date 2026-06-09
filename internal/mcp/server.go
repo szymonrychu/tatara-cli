@@ -48,13 +48,22 @@ func (s *Server) clientFor(t Tool) *client.Client {
 	return s.memory
 }
 
-func (s *Server) register(t Tool) {
+// buildTool converts a registry Tool into an mcp-go Tool. NewTool seeds a
+// default object InputSchema; we clear it so the raw schema is the only one
+// set. mcp-go's Tool.MarshalJSON rejects having both InputSchema and
+// RawInputSchema, which otherwise breaks the entire tools/list response.
+func buildTool(t Tool) mcplib.Tool {
 	tool := mcplib.NewTool(
 		t.Name,
 		mcplib.WithDescription(t.Description),
 		mcplib.WithRawInputSchema(t.Schema),
 	)
-	s.srv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	tool.InputSchema = mcplib.ToolInputSchema{}
+	return tool
+}
+
+func (s *Server) register(t Tool) {
+	s.srv.AddTool(buildTool(t), func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		args := req.GetArguments()
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		if err != nil {
