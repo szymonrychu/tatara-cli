@@ -657,3 +657,48 @@ func TestCodeBridges_BuildQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeImportant_ByParam(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"by betweenness", map[string]any{"repo": "r", "by": "betweenness", "limit": float64(10)}, map[string]string{"repo": "r", "by": "betweenness", "limit": "10"}},
+		{"by degree", map[string]any{"by": "degree"}, map[string]string{"by": "degree"}},
+		{"no by", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_important"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/important", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeImportant_NoByParam_NotForwarded(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_important"), map[string]any{"repo": "r"})
+	require.NoError(t, err)
+	require.False(t, gotQuery.Has("by"), "by must not be forwarded when absent")
+}
