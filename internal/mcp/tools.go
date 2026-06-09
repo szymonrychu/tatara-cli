@@ -212,6 +212,9 @@ func AllTools() []Tool {
 		{Name: "code_explain", Description: "Full context for a code entity: detail, in/out neighbors with file locations.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
 			Build:  codeGet("/code-graph/explain", []string{"id"}, []string{"repo"})},
+		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), optionally filtered by relation and min confidence.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id"]}`),
+			Build:  codeGet("/code-graph/related", []string{"id"}, []string{"relations", "min_confidence", "repo"})},
 	}
 }
 

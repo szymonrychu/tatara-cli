@@ -474,3 +474,47 @@ func TestConfidenceParams_ForwardedAsQueryParams(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeRelated_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{
+			"all params",
+			map[string]any{"id": "go:func:m.F", "relations": "conceptually_related_to,cites", "min_confidence": float64(0.5), "repo": "r"},
+			map[string]string{"id": "go:func:m.F", "relations": "conceptually_related_to,cites", "min_confidence": "0.5", "repo": "r"},
+		},
+		{
+			"id only",
+			map[string]any{"id": "go:func:m.F"},
+			map[string]string{"id": "go:func:m.F"},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_related"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/related", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeRelated_RequireID(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_related").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
+}
