@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -142,7 +143,7 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 }
 
 func TestAllTools_ThirteenEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 23)
+	assert.Len(t, AllTools(), 28)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -339,4 +340,131 @@ func TestCodeTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // relation required
 	_, _, _, err = toolByName(t, "code_cross_repo").Build(map[string]any{"repo": "r"})
 	require.Error(t, err) // id required
+}
+
+// TestAllTools_Count verifies the tool registry grows to 28 after Phase 1 additions.
+func TestAllTools_Count(t *testing.T) {
+	assert.Len(t, AllTools(), 28)
+}
+
+func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
+	cases := []struct {
+		tool string
+		args map[string]any
+		path string
+		q    map[string]string
+	}{
+		{
+			"code_path",
+			map[string]any{"from": "a", "to": "b", "relations": "calls,imports", "max_depth": float64(5)},
+			"/code-graph/path",
+			map[string]string{"from": "a", "to": "b", "relations": "calls,imports", "max_depth": "5"},
+		},
+		{
+			"code_path",
+			map[string]any{"from": "a", "to": "b"},
+			"/code-graph/path",
+			map[string]string{"from": "a", "to": "b"},
+		},
+		{
+			"code_important",
+			map[string]any{"repo": "r", "limit": float64(20)},
+			"/code-graph/important",
+			map[string]string{"repo": "r", "limit": "20"},
+		},
+		{
+			"code_important",
+			map[string]any{},
+			"/code-graph/important",
+			map[string]string{},
+		},
+		{
+			"code_stats",
+			map[string]any{"repo": "r"},
+			"/code-graph/stats",
+			map[string]string{"repo": "r"},
+		},
+		{
+			"code_stats",
+			map[string]any{},
+			"/code-graph/stats",
+			map[string]string{},
+		},
+		{
+			"code_ambiguous_edges",
+			map[string]any{"repo": "r", "limit": float64(10)},
+			"/code-graph/ambiguous",
+			map[string]string{"repo": "r", "limit": "10"},
+		},
+		{
+			"code_explain",
+			map[string]any{"id": "go:func:m.F", "repo": "r"},
+			"/code-graph/explain",
+			map[string]string{"id": "go:func:m.F", "repo": "r"},
+		},
+		{
+			"code_explain",
+			map[string]any{"id": "go:func:m.F"},
+			"/code-graph/explain",
+			map[string]string{"id": "go:func:m.F"},
+		},
+	}
+	for i, c := range cases {
+		c := c
+		t.Run(fmt.Sprintf("%s/%d", c.tool, i), func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, c.tool), c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.path, gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestNewCodeGraphTools_RequireArgs(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_path").Build(map[string]any{"from": "a"})
+	require.Error(t, err) // to required
+	_, _, _, err = toolByName(t, "code_path").Build(map[string]any{"to": "b"})
+	require.Error(t, err) // from required
+	_, _, _, err = toolByName(t, "code_explain").Build(map[string]any{})
+	require.Error(t, err) // id required
+}
+
+func TestConfidenceParams_ForwardedAsQueryParams(t *testing.T) {
+	tools := []string{"code_neighbors", "code_callers", "code_callees", "code_dependencies", "code_dependents"}
+	for _, name := range tools {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			args := map[string]any{
+				"repo":           "r",
+				"id":             "x",
+				"min_confidence": float64(0.8),
+				"tier":           "HIGH",
+			}
+			if name == "code_neighbors" {
+				args["relation"] = "calls"
+			}
+			_, err := Invoke(context.Background(), cli, toolByName(t, name), args)
+			require.NoError(t, err)
+			require.Equal(t, "0.8", gotQuery.Get("min_confidence"), "tool %s: min_confidence", name)
+			require.Equal(t, "HIGH", gotQuery.Get("tier"), "tool %s: tier", name)
+		})
+	}
 }
