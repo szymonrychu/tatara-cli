@@ -518,3 +518,56 @@ func TestCodeRelated_RequireID(t *testing.T) {
 	_, _, _, err := toolByName(t, "code_related").Build(map[string]any{"repo": "r"})
 	require.Error(t, err) // id required
 }
+
+func TestCodeHyperedges_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"entity and repo", map[string]any{"entity": "go:func:m.F", "repo": "r"}, map[string]string{"entity": "go:func:m.F", "repo": "r"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedges"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/hyperedges", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeHyperedge_BuildQuery(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedge"), map[string]any{"id": "he:r:file:label", "repo": "r"})
+	require.NoError(t, err)
+	require.Equal(t, "/code-graph/hyperedge", gotPath)
+	require.Equal(t, "he:r:file:label", gotQuery.Get("id"))
+	require.Equal(t, "r", gotQuery.Get("repo"))
+}
+
+func TestCodeHyperedge_RequireID(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // id required
+}

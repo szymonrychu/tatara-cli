@@ -215,6 +215,12 @@ func AllTools() []Tool {
 		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), optionally filtered by relation and min confidence.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id"]}`),
 			Build:  codeGet("/code-graph/related", []string{"id"}, []string{"relations", "min_confidence", "repo"})},
+		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity and/or repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}}}`),
+			Build:  codeGet("/code-graph/hyperedges", nil, []string{"entity", "repo"})},
+		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
+			Build:  codeGet("/code-graph/hyperedge", []string{"id"}, []string{"repo"})},
 	}
 }
 
