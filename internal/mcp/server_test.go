@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
@@ -12,6 +13,17 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
 )
+
+// Every registered tool must marshal cleanly. mcp-go's NewTool seeds a default
+// object InputSchema; combined with a raw schema the tool has both InputSchema
+// and RawInputSchema set, which fails tools/list marshalling and leaves the
+// agent with zero tatara tools.
+func TestBuildTool_AllToolsMarshal(t *testing.T) {
+	for _, tl := range append(AllTools(), OperatorTools()...) {
+		_, err := json.Marshal(buildTool(tl))
+		require.NoErrorf(t, err, "tool %s must marshal for tools/list", tl.Name)
+	}
+}
 
 func TestNewServer_RegistersAllTools(t *testing.T) {
 	tok := &auth.Token{

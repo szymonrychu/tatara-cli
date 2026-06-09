@@ -48,12 +48,16 @@ func (s *Server) clientFor(t Tool) *client.Client {
 	return s.memory
 }
 
+// buildTool constructs the mcp-go Tool for a tatara Tool. NewToolWithRawSchema
+// sets only RawInputSchema: NewTool seeds a default object InputSchema, and a
+// Tool with both InputSchema and RawInputSchema set fails tools/list
+// marshalling, leaving the agent with zero tatara tools.
+func buildTool(t Tool) mcplib.Tool {
+	return mcplib.NewToolWithRawSchema(t.Name, t.Description, t.Schema)
+}
+
 func (s *Server) register(t Tool) {
-	tool := mcplib.NewTool(
-		t.Name,
-		mcplib.WithDescription(t.Description),
-		mcplib.WithRawInputSchema(t.Schema),
-	)
+	tool := buildTool(t)
 	s.srv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		args := req.GetArguments()
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
