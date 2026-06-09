@@ -280,7 +280,7 @@ func argOrEnv(a map[string]any, key, envKey string) string {
 	return os.Getenv(envKey)
 }
 
-// OperatorTools returns the 9 tatara-operator REST tools (Target=TargetOperator).
+// OperatorTools returns the 12 tatara-operator REST tools (Target=TargetOperator).
 func OperatorTools() []Tool {
 	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
 		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetOperator, Build: build}
@@ -385,6 +385,72 @@ func OperatorTools() []Tool {
 					}
 				}
 				return http.MethodPatch, "/subtasks/" + url.PathEscape(st), body, nil
+			}),
+		op("propose_issue", "Propose a new SCM issue for a deferred bug or improvement; created behind the awaiting-approval label until a human approves.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"repositoryRef":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]}},"required":["title","body","kind","repo"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				repo := argString(a, "repositoryRef")
+				if repo == "" {
+					repo = argString(a, "repo")
+				}
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				if argString(a, "title") == "" {
+					return "", "", nil, fmt.Errorf("title required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				if argString(a, "kind") == "" {
+					return "", "", nil, fmt.Errorf("kind required")
+				}
+				body := map[string]any{
+					"repositoryRef": repo,
+					"title":         a["title"],
+					"body":          a["body"],
+					"kind":          a["kind"],
+				}
+				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/issues", body, nil
+			}),
+		op("review_verdict", "Record a review verdict on a human-authored PR/MR Task (decision approve|request_changes|comment, optional body and inline suggestions). The operator posts it to SCM.",
+			`{"type":"object","properties":{"task":{"type":"string"},"decision":{"type":"string","enum":["approve","request_changes","comment"]},"body":{"type":"string"},"suggestions":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"body":{"type":"string"}},"required":["path","line","body"]}}},"required":["decision"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "decision") == "" {
+					return "", "", nil, fmt.Errorf("decision required")
+				}
+				body := map[string]any{"decision": a["decision"]}
+				if v, ok := a["body"]; ok {
+					body["body"] = v
+				}
+				if v, ok := a["suggestions"]; ok {
+					body["suggestions"] = v
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/review", body, nil
+			}),
+		op("pr_outcome", "Decide the outcome of a tatara-authored PR/MR Task (action merge|close, optional reason). selfImprove only; the operator enforces merge policy.",
+			`{"type":"object","properties":{"task":{"type":"string"},"action":{"type":"string","enum":["merge","close"]},"reason":{"type":"string"}},"required":["action"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "action") == "" {
+					return "", "", nil, fmt.Errorf("action required")
+				}
+				body := map[string]any{"action": a["action"]}
+				if v, ok := a["reason"]; ok {
+					body["reason"] = v
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
 	}
 }
