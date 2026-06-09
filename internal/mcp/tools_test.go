@@ -142,8 +142,8 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 	return c
 }
 
-func TestAllTools_TwentyEightEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 28)
+func TestAllTools_ThirtyFourEntries(t *testing.T) {
+	assert.Len(t, AllTools(), 34)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -342,9 +342,9 @@ func TestCodeTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // id required
 }
 
-// TestAllTools_Count verifies the tool registry grows to 28 after Phase 1 additions.
+// TestAllTools_Count verifies the tool registry grows to 34 after Phase 2 additions.
 func TestAllTools_Count(t *testing.T) {
-	assert.Len(t, AllTools(), 28)
+	assert.Len(t, AllTools(), 34)
 }
 
 func TestNewCodeGraphTools_BuildQueries(t *testing.T) {

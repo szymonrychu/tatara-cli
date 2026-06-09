@@ -31,7 +31,7 @@ type Tool struct {
 	Build       func(args map[string]any) (method, path string, body any, err error)
 }
 
-// AllTools returns the 28-entry tool registry mapping tatara-memory REST endpoints.
+// AllTools returns the 34-entry tool registry mapping tatara-memory REST endpoints.
 func AllTools() []Tool {
 	return []Tool{
 		{
