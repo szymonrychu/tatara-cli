@@ -109,7 +109,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 9)
+	require.Len(t, OperatorTools(), 12)
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
@@ -701,4 +701,126 @@ func TestCodeImportant_NoByParam_NotForwarded(t *testing.T) {
 	_, err := Invoke(context.Background(), cli, toolByName(t, "code_important"), map[string]any{"repo": "r"})
 	require.NoError(t, err)
 	require.False(t, gotQuery.Has("by"), "by must not be forwarded when absent")
+}
+
+func TestOperatorTools_SCMBuildPaths(t *testing.T) {
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		method string
+		path   string
+	}{
+		{"propose_issue", map[string]any{"project": "alpha", "repositoryRef": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "bug"}, http.MethodPost, "/projects/alpha/issues"},
+		{"propose_issue", map[string]any{"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "improvement"}, http.MethodPost, "/projects/alpha/issues"},
+		{"review_verdict", map[string]any{"task": "t1", "decision": "approve"}, http.MethodPost, "/tasks/t1/review"},
+		{"pr_outcome", map[string]any{"task": "t1", "action": "merge"}, http.MethodPost, "/tasks/t1/pr-outcome"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			m, p, _, err := operatorToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.method, m)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestOperatorTools_SCMRequireArgs(t *testing.T) {
+	_, _, _, err := operatorToolByName(t, "propose_issue").Build(map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"})
+	require.Error(t, err) // project required (no env set)
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "title": "t", "body": "b", "kind": "bug"})
+	require.Error(t, err) // repo required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "body": "b", "kind": "bug"})
+	require.Error(t, err) // title required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "title": "t", "kind": "bug"})
+	require.Error(t, err) // body required
+	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "repo": "r", "title": "t", "body": "b"})
+	require.Error(t, err) // kind required
+	_, _, _, err = operatorToolByName(t, "review_verdict").Build(map[string]any{"decision": "approve"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "review_verdict").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // decision required
+	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"action": "merge"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // action required
+}
+
+func TestOperatorTools_SCMEnvFallback(t *testing.T) {
+	t.Setenv("TATARA_TASK", "task-from-env")
+	t.Setenv("TATARA_PROJECT", "proj-from-env")
+	cases := []struct {
+		tool string
+		args map[string]any
+		path string
+	}{
+		{"propose_issue", map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"}, "/projects/proj-from-env/issues"},
+		{"review_verdict", map[string]any{"decision": "comment"}, "/tasks/task-from-env/review"},
+		{"pr_outcome", map[string]any{"action": "merge"}, "/tasks/task-from-env/pr-outcome"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			_, p, _, err := operatorToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestOperatorTools_SCMBodies(t *testing.T) {
+	t.Run("propose_issue", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "propose_issue").Build(map[string]any{
+			"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "bug",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "szymonrychu/tatara", m["repositoryRef"])
+		require.Equal(t, "t", m["title"])
+		require.Equal(t, "b", m["body"])
+		require.Equal(t, "bug", m["kind"])
+		_, hasRepo := m["repo"]
+		require.False(t, hasRepo, "body must use repositoryRef, not repo")
+	})
+	t.Run("review_verdict", func(t *testing.T) {
+		sugg := []any{map[string]any{"path": "a.go", "line": float64(12), "body": "fix"}}
+		_, _, body, err := operatorToolByName(t, "review_verdict").Build(map[string]any{
+			"task": "t1", "decision": "request_changes", "body": "no", "suggestions": sugg,
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "request_changes", m["decision"])
+		require.Equal(t, "no", m["body"])
+		require.Equal(t, sugg, m["suggestions"])
+	})
+	t.Run("review_verdict_decision_only", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "review_verdict").Build(map[string]any{
+			"task": "t1", "decision": "comment",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "comment", m["decision"])
+		_, hasBody := m["body"]
+		require.False(t, hasBody)
+		_, hasSugg := m["suggestions"]
+		require.False(t, hasSugg)
+	})
+	t.Run("pr_outcome", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "pr_outcome").Build(map[string]any{
+			"task": "t1", "action": "close", "reason": "stale",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "close", m["action"])
+		require.Equal(t, "stale", m["reason"])
+	})
+	t.Run("pr_outcome_action_only", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "pr_outcome").Build(map[string]any{
+			"task": "t1", "action": "merge",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "merge", m["action"])
+		_, hasReason := m["reason"]
+		require.False(t, hasReason)
+	})
 }

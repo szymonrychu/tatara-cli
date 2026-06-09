@@ -49,3 +49,14 @@ func TestNewServer_RegistersMemoryAndOperatorTools(t *testing.T) {
 	s := NewServer(mem, op, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.Equal(t, len(AllTools())+len(OperatorTools()), s.ToolCount())
 }
+
+func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
+	tools := OperatorTools()
+	require.Len(t, tools, 12)
+	for _, tl := range tools {
+		var v any
+		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "operator tool %q has invalid JSON schema", tl.Name)
+		_, err := json.Marshal(buildTool(tl))
+		require.NoErrorf(t, err, "operator tool %q must marshal for tools/list", tl.Name)
+	}
+}
