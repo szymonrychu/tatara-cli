@@ -221,6 +221,12 @@ func AllTools() []Tool {
 		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
 			Build:  codeGet("/code-graph/hyperedge", []string{"id"}, []string{"repo"})},
+		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), optionally filtered by repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
+			Build:  codeGet("/code-graph/communities", nil, []string{"repo"})},
+		{Name: "code_community", Description: "List the member entities of a specific community.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer"}},"required":["repo","community"]}`),
+			Build:  codeGet("/code-graph/community", []string{"repo", "community"}, nil)},
 	}
 }
 

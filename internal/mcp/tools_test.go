@@ -571,3 +571,58 @@ func TestCodeHyperedge_RequireID(t *testing.T) {
 	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"repo": "r"})
 	require.Error(t, err) // id required
 }
+
+func TestCodeCommunities_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"repo", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_communities"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/communities", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
+
+func TestCodeCommunity_BuildQuery(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	cli := freshClient(t, srv.URL)
+	_, err := Invoke(context.Background(), cli, toolByName(t, "code_community"), map[string]any{"repo": "r", "community": float64(3)})
+	require.NoError(t, err)
+	require.Equal(t, "/code-graph/community", gotPath)
+	require.Equal(t, "r", gotQuery.Get("repo"))
+	require.Equal(t, "3", gotQuery.Get("community"))
+}
+
+func TestCodeCommunity_RequireArgs(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_community").Build(map[string]any{"community": float64(1)})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_community").Build(map[string]any{"repo": "r"})
+	require.Error(t, err) // community required
+}
