@@ -142,7 +142,7 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 	return c
 }
 
-func TestAllTools_ThirteenEntries(t *testing.T) {
+func TestAllTools_TwentyEightEntries(t *testing.T) {
 	assert.Len(t, AllTools(), 28)
 }
 
@@ -365,6 +365,12 @@ func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
 			map[string]any{"from": "a", "to": "b"},
 			"/code-graph/path",
 			map[string]string{"from": "a", "to": "b"},
+		},
+		{
+			"code_path",
+			map[string]any{"repo": "myrepo", "from": "a", "to": "b"},
+			"/code-graph/path",
+			map[string]string{"repo": "myrepo", "from": "a", "to": "b"},
 		},
 		{
 			"code_important",
