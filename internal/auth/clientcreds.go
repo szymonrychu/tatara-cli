@@ -29,13 +29,12 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil || meta.TokenEndpoint == "" {
 		return "", time.Time{}, errors.New("oidc discovery: no token_endpoint")
 	}
-	form := url.Values{
-		"grant_type":    {"client_credentials"},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-	}
+	form := url.Values{"grant_type": {"client_credentials"}}
 	treq, _ := http.NewRequestWithContext(ctx, http.MethodPost, meta.TokenEndpoint, strings.NewReader(form.Encode()))
 	treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Keycloak confidential clients default to client_secret_basic: send the
+	// client credentials via HTTP Basic auth (client_secret_post 401s).
+	treq.SetBasicAuth(clientID, clientSecret)
 	tresp, err := http.DefaultClient.Do(treq) //nolint:gosec // token endpoint URL is from issuer discovery, operator-injected
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("token request: %w", err)

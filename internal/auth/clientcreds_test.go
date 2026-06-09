@@ -22,8 +22,11 @@ func newFakeIssuer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		require.Equal(t, "client_credentials", r.Form.Get("grant_type"))
-		require.Equal(t, "cid", r.Form.Get("client_id"))
-		require.Equal(t, "secret", r.Form.Get("client_secret"))
+		// Credentials must arrive via HTTP Basic auth (Keycloak client_secret_basic).
+		id, secret, ok := r.BasicAuth()
+		require.True(t, ok, "client credentials must be sent via Basic auth")
+		require.Equal(t, "cid", id)
+		require.Equal(t, "secret", secret)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"tok-123","expires_in":300,"token_type":"Bearer"}`)
 	})
