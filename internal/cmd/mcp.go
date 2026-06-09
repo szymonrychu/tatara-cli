@@ -44,34 +44,46 @@ func newMCPCmd() *cobra.Command {
 			}
 			token, err := auth.LoadToken(tokenPath)
 			if err != nil {
-				return err
+				tokStr, ccErr := auth.AccessToken(ctx)
+				if ccErr != nil {
+					return ccErr
+				}
+				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
+				tokenPath = ""
 			}
 
-			refresh := func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-				return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-			}
-			cli, err := client.New(client.Config{
+			cliCfg := client.Config{
 				BaseURL:   base,
 				Token:     token,
 				TokenPath: tokenPath,
-				Reload:    func() (*auth.Token, error) { return auth.LoadToken(tokenPath) },
-				Refresh:   refresh,
-				Save:      func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) },
-			})
+			}
+			if tokenPath != "" {
+				cliCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+				cliCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
+				}
+				cliCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+			}
+			cli, err := client.New(cliCfg)
 			if err != nil {
 				return err
 			}
 
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
-			opCli, err := client.New(client.Config{
+			opCfg := client.Config{
 				BaseURL:   opBase,
 				Token:     token,
 				TokenPath: tokenPath,
-				Reload:    func() (*auth.Token, error) { return auth.LoadToken(tokenPath) },
-				Refresh:   refresh,
-				Save:      func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) },
-			})
+			}
+			if tokenPath != "" {
+				opCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+				opCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
+				}
+				opCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+			}
+			opCli, err := client.New(opCfg)
 			if err != nil {
 				return err
 			}

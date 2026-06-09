@@ -42,7 +42,12 @@ func newRawCmd() *cobra.Command {
 			}
 			token, err := auth.LoadToken(tokenPath)
 			if err != nil {
-				return err
+				tokStr, ccErr := auth.AccessToken(ctx)
+				if ccErr != nil {
+					return ccErr
+				}
+				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
+				tokenPath = ""
 			}
 
 			var body io.Reader
@@ -62,19 +67,19 @@ func newRawCmd() *cobra.Command {
 				body = strings.NewReader(dataFlag)
 			}
 
-			refresh := func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-				return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-			}
-			cli, err := client.New(client.Config{
+			cfg := client.Config{
 				BaseURL:   base,
 				Token:     token,
 				TokenPath: tokenPath,
-				Reload:    func() (*auth.Token, error) { return auth.LoadToken(tokenPath) },
-				Refresh:   refresh,
-				Save: func(t *auth.Token) error {
-					return auth.SaveToken(tokenPath, t)
-				},
-			})
+			}
+			if tokenPath != "" {
+				cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+				cfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
+				}
+				cfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+			}
+			cli, err := client.New(cfg)
 			if err != nil {
 				return err
 			}
