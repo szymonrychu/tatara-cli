@@ -31,7 +31,7 @@ type Tool struct {
 	Build       func(args map[string]any) (method, path string, body any, err error)
 }
 
-// AllTools returns the 23-entry tool registry mapping tatara-memory REST endpoints.
+// AllTools returns the 28-entry tool registry mapping tatara-memory REST endpoints.
 func AllTools() []Tool {
 	return []Tool{
 		{
@@ -174,20 +174,20 @@ func AllTools() []Tool {
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"}},"required":["repo","id"]}`),
 			Build:  codeGet("/code/entity", []string{"repo", "id"}, nil)},
 		{Name: "code_neighbors", Description: "Traverse the code graph from an entity along a relation.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"relation":{"type":"string"},"direction":{"type":"string","enum":["out","in"]},"depth":{"type":"integer"}},"required":["repo","id","relation"]}`),
-			Build:  codeGet("/code/neighbors", []string{"repo", "id", "relation"}, []string{"direction", "depth"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"relation":{"type":"string"},"direction":{"type":"string","enum":["out","in"]},"depth":{"type":"integer"},"min_confidence":{"type":"number"},"tier":{"type":"string"}},"required":["repo","id","relation"]}`),
+			Build:  codeGet("/code/neighbors", []string{"repo", "id", "relation"}, []string{"direction", "depth", "min_confidence", "tier"})},
 		{Name: "code_callers", Description: "Who calls this function/method (reverse calls), to depth N.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
-			Build:  codeGet("/code/callers", []string{"repo", "id"}, []string{"depth"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"},"min_confidence":{"type":"number"},"tier":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/callers", []string{"repo", "id"}, []string{"depth", "min_confidence", "tier"})},
 		{Name: "code_callees", Description: "What this function/method calls (forward calls), to depth N.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
-			Build:  codeGet("/code/callees", []string{"repo", "id"}, []string{"depth"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"},"min_confidence":{"type":"number"},"tier":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/callees", []string{"repo", "id"}, []string{"depth", "min_confidence", "tier"})},
 		{Name: "code_dependents", Description: "What depends on this entity (reverse imports/references/depends_on).",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
-			Build:  codeGet("/code/dependents", []string{"repo", "id"}, []string{"depth"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"},"min_confidence":{"type":"number"},"tier":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/dependents", []string{"repo", "id"}, []string{"depth", "min_confidence", "tier"})},
 		{Name: "code_dependencies", Description: "What this entity depends on (forward imports/references/depends_on).",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"}},"required":["repo","id"]}`),
-			Build:  codeGet("/code/dependencies", []string{"repo", "id"}, []string{"depth"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"},"depth":{"type":"integer"},"min_confidence":{"type":"number"},"tier":{"type":"string"}},"required":["repo","id"]}`),
+			Build:  codeGet("/code/dependencies", []string{"repo", "id"}, []string{"depth", "min_confidence", "tier"})},
 		{Name: "code_file_imports", Description: "Imports out of a file's package.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"path":{"type":"string"}},"required":["repo","path"]}`),
 			Build:  codeGet("/code/file-imports", []string{"repo", "path"}, nil)},
@@ -197,6 +197,21 @@ func AllTools() []Tool {
 		{Name: "code_cross_repo", Description: "Cross-repo symbol links for an entity: who consumes what it provides and who provides what it requires.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"}},"required":["repo","id"]}`),
 			Build:  codeGet("/code/cross-repo", []string{"repo", "id"}, nil)},
+		{Name: "code_path", Description: "Shortest path between two code entities in the code graph.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"relations":{"type":"string"},"max_depth":{"type":"integer"}},"required":["from","to"]}`),
+			Build:  codeGet("/code-graph/path", []string{"from", "to"}, []string{"repo", "relations", "max_depth"})},
+		{Name: "code_important", Description: "Most important (highest-degree) entities in the code graph, optionally filtered by repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
+			Build:  codeGet("/code-graph/important", nil, []string{"repo", "limit"})},
+		{Name: "code_stats", Description: "Graph statistics: entity/edge counts, types, tiers, isolated entities, import cycles.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
+			Build:  codeGet("/code-graph/stats", nil, []string{"repo"})},
+		{Name: "code_ambiguous_edges", Description: "Edges with low confidence score or AMBIGUOUS tier, ordered by score ascending.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
+			Build:  codeGet("/code-graph/ambiguous", nil, []string{"repo", "limit"})},
+		{Name: "code_explain", Description: "Full context for a code entity: detail, in/out neighbors with file locations.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
+			Build:  codeGet("/code-graph/explain", []string{"id"}, []string{"repo"})},
 	}
 }
 
