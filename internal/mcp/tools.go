@@ -227,6 +227,9 @@ func AllTools() []Tool {
 		{Name: "code_community", Description: "List the member entities of a specific community.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer"}},"required":["repo","community"]}`),
 			Build:  codeGet("/code-graph/community", []string{"repo", "community"}, nil)},
+		{Name: "code_bridges", Description: "High-betweenness entities that connect more than one community (graph bridges), ranked, optionally filtered by repo and limited.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
+			Build:  codeGet("/code-graph/bridges", nil, []string{"repo", "limit"})},
 	}
 }
 

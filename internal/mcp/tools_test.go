@@ -626,3 +626,34 @@ func TestCodeCommunity_RequireArgs(t *testing.T) {
 	_, _, _, err = toolByName(t, "code_community").Build(map[string]any{"repo": "r"})
 	require.Error(t, err) // community required
 }
+
+func TestCodeBridges_BuildQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		q    map[string]string
+	}{
+		{"repo and limit", map[string]any{"repo": "r", "limit": float64(5)}, map[string]string{"repo": "r", "limit": "5"}},
+		{"no args", map[string]any{}, map[string]string{}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var gotPath string
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQuery = r.URL.Query()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer srv.Close()
+			cli := freshClient(t, srv.URL)
+			_, err := Invoke(context.Background(), cli, toolByName(t, "code_bridges"), c.args)
+			require.NoError(t, err)
+			require.Equal(t, "/code-graph/bridges", gotPath)
+			for k, v := range c.q {
+				require.Equal(t, v, gotQuery.Get(k), "param %s", k)
+			}
+		})
+	}
+}
