@@ -714,6 +714,7 @@ func TestOperatorTools_SCMBuildPaths(t *testing.T) {
 		{"propose_issue", map[string]any{"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "improvement"}, http.MethodPost, "/projects/alpha/issues"},
 		{"review_verdict", map[string]any{"task": "t1", "decision": "approve"}, http.MethodPost, "/tasks/t1/review"},
 		{"pr_outcome", map[string]any{"task": "t1", "action": "merge"}, http.MethodPost, "/tasks/t1/pr-outcome"},
+		{"issue_outcome", map[string]any{"task": "t1", "action": "implement"}, http.MethodPost, "/tasks/t1/issue-outcome"},
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
