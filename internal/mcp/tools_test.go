@@ -745,6 +745,10 @@ func TestOperatorTools_SCMRequireArgs(t *testing.T) {
 	require.Error(t, err) // task required (no env set)
 	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"task": "t1"})
 	require.Error(t, err) // action required
+	_, _, _, err = operatorToolByName(t, "issue_outcome").Build(map[string]any{"action": "implement"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "issue_outcome").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // action required
 }
 
 func TestOperatorTools_SCMEnvFallback(t *testing.T) {
@@ -758,6 +762,7 @@ func TestOperatorTools_SCMEnvFallback(t *testing.T) {
 		{"propose_issue", map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"}, "/projects/proj-from-env/issues"},
 		{"review_verdict", map[string]any{"decision": "comment"}, "/tasks/task-from-env/review"},
 		{"pr_outcome", map[string]any{"action": "merge"}, "/tasks/task-from-env/pr-outcome"},
+		{"issue_outcome", map[string]any{"action": "close"}, "/tasks/task-from-env/issue-outcome"},
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
