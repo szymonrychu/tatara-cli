@@ -829,4 +829,23 @@ func TestOperatorTools_SCMBodies(t *testing.T) {
 		_, hasReason := m["reason"]
 		require.False(t, hasReason)
 	})
+	t.Run("issue_outcome_close", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "close", "comment": "out of scope",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "close", m["action"])
+		require.Equal(t, "out of scope", m["comment"])
+	})
+	t.Run("issue_outcome_action_only", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "implement",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "implement", m["action"])
+		_, hasComment := m["comment"]
+		require.False(t, hasComment)
+	})
 }
