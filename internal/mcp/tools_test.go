@@ -109,7 +109,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 12)
+	require.Len(t, OperatorTools(), 13)
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
@@ -714,6 +714,7 @@ func TestOperatorTools_SCMBuildPaths(t *testing.T) {
 		{"propose_issue", map[string]any{"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "improvement"}, http.MethodPost, "/projects/alpha/issues"},
 		{"review_verdict", map[string]any{"task": "t1", "decision": "approve"}, http.MethodPost, "/tasks/t1/review"},
 		{"pr_outcome", map[string]any{"task": "t1", "action": "merge"}, http.MethodPost, "/tasks/t1/pr-outcome"},
+		{"issue_outcome", map[string]any{"task": "t1", "action": "implement"}, http.MethodPost, "/tasks/t1/issue-outcome"},
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
@@ -744,6 +745,10 @@ func TestOperatorTools_SCMRequireArgs(t *testing.T) {
 	require.Error(t, err) // task required (no env set)
 	_, _, _, err = operatorToolByName(t, "pr_outcome").Build(map[string]any{"task": "t1"})
 	require.Error(t, err) // action required
+	_, _, _, err = operatorToolByName(t, "issue_outcome").Build(map[string]any{"action": "implement"})
+	require.Error(t, err) // task required (no env set)
+	_, _, _, err = operatorToolByName(t, "issue_outcome").Build(map[string]any{"task": "t1"})
+	require.Error(t, err) // action required
 }
 
 func TestOperatorTools_SCMEnvFallback(t *testing.T) {
@@ -757,6 +762,7 @@ func TestOperatorTools_SCMEnvFallback(t *testing.T) {
 		{"propose_issue", map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"}, "/projects/proj-from-env/issues"},
 		{"review_verdict", map[string]any{"decision": "comment"}, "/tasks/task-from-env/review"},
 		{"pr_outcome", map[string]any{"action": "merge"}, "/tasks/task-from-env/pr-outcome"},
+		{"issue_outcome", map[string]any{"action": "close"}, "/tasks/task-from-env/issue-outcome"},
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
@@ -822,5 +828,24 @@ func TestOperatorTools_SCMBodies(t *testing.T) {
 		require.Equal(t, "merge", m["action"])
 		_, hasReason := m["reason"]
 		require.False(t, hasReason)
+	})
+	t.Run("issue_outcome_close", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "close", "comment": "out of scope",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "close", m["action"])
+		require.Equal(t, "out of scope", m["comment"])
+	})
+	t.Run("issue_outcome_action_only", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "implement",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "implement", m["action"])
+		_, hasComment := m["comment"]
+		require.False(t, hasComment)
 	})
 }

@@ -280,7 +280,7 @@ func argOrEnv(a map[string]any, key, envKey string) string {
 	return os.Getenv(envKey)
 }
 
-// OperatorTools returns the 12 tatara-operator REST tools (Target=TargetOperator).
+// OperatorTools returns the 13 tatara-operator REST tools (Target=TargetOperator).
 func OperatorTools() []Tool {
 	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
 		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetOperator, Build: build}
@@ -451,6 +451,22 @@ func OperatorTools() []Tool {
 					body["reason"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
+			}),
+		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR) or close (with a comment).",
+			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close"]},"comment":{"type":"string"}},"required":["action"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "action") == "" {
+					return "", "", nil, fmt.Errorf("action required")
+				}
+				body := map[string]any{"action": a["action"]}
+				if v, ok := a["comment"]; ok {
+					body["comment"] = v
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
 			}),
 	}
 }
