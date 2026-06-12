@@ -45,6 +45,17 @@ the SCM-projects contract lock. See
 `~/Documents/tatara/docs/superpowers/plans/2026-06-09-scm-projects-cli.md`
 and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
 
+## v0.6.0 - chat MCP tool group
+
+**Status:** code-complete 2026-06-12 (tatara-cli#24), pending tag + release.
+
+10 chat tools (chat_create_room, chat_list_rooms, chat_get_room,
+chat_close_room, chat_add_participant, chat_list_participants,
+chat_remove_participant, chat_send_message, chat_poll_messages,
+chat_get_log) mapping the tatara-chat REST API 1:1. Third client target
+(TargetChat); chat URL wiring via flag(--chat-base-url)/env(TATARA_CHAT_URL)/
+file(chatBaseUrl)/default. Single-token audience assumption as for operator.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned

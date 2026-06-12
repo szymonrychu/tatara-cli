@@ -17,16 +17,19 @@ type Server struct {
 	srv      *server.MCPServer
 	memory   *client.Client
 	operator *client.Client
+	chat     *client.Client
 	log      *slog.Logger
 }
 
-// NewServer registers the tatara-memory tools (against memory) and the
-// tatara-operator tools (against operator).
-func NewServer(memory, operator *client.Client, log *slog.Logger) *Server {
+// NewServer registers the tatara-memory tools (against memory), the
+// tatara-operator tools (against operator), and the tatara-chat tools
+// (against chat).
+func NewServer(memory, operator, chat *client.Client, log *slog.Logger) *Server {
 	s := &Server{
 		srv:      server.NewMCPServer("tatara", version.Version, server.WithToolCapabilities(true)),
 		memory:   memory,
 		operator: operator,
+		chat:     chat,
 		log:      log,
 	}
 	for _, t := range AllTools() {
@@ -35,17 +38,24 @@ func NewServer(memory, operator *client.Client, log *slog.Logger) *Server {
 	for _, t := range OperatorTools() {
 		s.register(t)
 	}
+	for _, t := range ChatTools() {
+		s.register(t)
+	}
 	return s
 }
 
 // ToolCount returns the number of registered tools (test/observability helper).
-func (s *Server) ToolCount() int { return len(AllTools()) + len(OperatorTools()) }
+func (s *Server) ToolCount() int { return len(AllTools()) + len(OperatorTools()) + len(ChatTools()) }
 
 func (s *Server) clientFor(t Tool) *client.Client {
-	if t.Target == TargetOperator {
+	switch t.Target {
+	case TargetOperator:
 		return s.operator
+	case TargetChat:
+		return s.chat
+	default:
+		return s.memory
 	}
-	return s.memory
 }
 
 // buildTool constructs the mcp-go Tool for a tatara Tool. NewToolWithRawSchema

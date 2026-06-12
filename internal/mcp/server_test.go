@@ -19,7 +19,9 @@ import (
 // and RawInputSchema set, which fails tools/list marshalling and leaves the
 // agent with zero tatara tools.
 func TestBuildTool_AllToolsMarshal(t *testing.T) {
-	for _, tl := range append(AllTools(), OperatorTools()...) {
+	all := append(AllTools(), OperatorTools()...)
+	all = append(all, ChatTools()...)
+	for _, tl := range all {
 		_, err := json.Marshal(buildTool(tl))
 		require.NoErrorf(t, err, "tool %s must marshal for tools/list", tl.Name)
 	}
@@ -35,7 +37,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	require.NoError(t, err)
 
 	// Must not panic; all tools register without error.
-	srv := NewServer(c, c, slog.Default())
+	srv := NewServer(c, c, c, slog.Default())
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
@@ -43,11 +45,12 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	assert.Len(t, AllTools(), 34)
 }
 
-func TestNewServer_RegistersMemoryAndOperatorTools(t *testing.T) {
+func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
-	s := NewServer(mem, op, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	require.Equal(t, len(AllTools())+len(OperatorTools()), s.ToolCount())
+	ch := freshClient(t, "http://chat.invalid")
+	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools()), s.ToolCount())
 }
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
