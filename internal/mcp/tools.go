@@ -20,6 +20,7 @@ type Target int
 const (
 	TargetMemory   Target = iota // default: existing tools hit tatara-memory
 	TargetOperator               // operator tools hit tatara-operator
+	TargetChat                   // chat tools hit tatara-chat
 )
 
 // Tool describes a tatara REST operation exposed as an MCP tool.
@@ -467,6 +468,146 @@ func OperatorTools() []Tool {
 					body["comment"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
+			}),
+	}
+}
+
+// ChatTools returns the 10 tatara-chat REST tools (Target=TargetChat).
+func ChatTools() []Tool {
+	ch := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
+		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetChat, Build: build}
+	}
+	return []Tool{
+		ch("chat_create_room", "Create a chat room. Returns the room id.",
+			`{"type":"object","properties":{"name":{"type":"string"},"created_by":{"type":"string"}},"required":["name","created_by"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				if argString(a, "name") == "" {
+					return "", "", nil, fmt.Errorf("name required")
+				}
+				if argString(a, "created_by") == "" {
+					return "", "", nil, fmt.Errorf("created_by required")
+				}
+				return http.MethodPost, "/rooms", map[string]any{"name": a["name"], "created_by": a["created_by"]}, nil
+			}),
+		ch("chat_list_rooms", "List chat rooms, optionally filtered by status (active|archived).",
+			`{"type":"object","properties":{"status":{"type":"string","enum":["active","archived"]}}}`,
+			func(a map[string]any) (string, string, any, error) {
+				path := "/rooms"
+				if s := argString(a, "status"); s != "" {
+					path += "?status=" + url.QueryEscape(s)
+				}
+				return http.MethodGet, path, nil, nil
+			}),
+		ch("chat_get_room", "Get a chat room and its participants by id.",
+			`{"type":"object","properties":{"room":{"type":"string"}},"required":["room"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(room), nil, nil
+			}),
+		ch("chat_close_room", "Close (archive) a chat room by id.",
+			`{"type":"object","properties":{"room":{"type":"string"}},"required":["room"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				return http.MethodDelete, "/rooms/" + url.PathEscape(room), nil, nil
+			}),
+		ch("chat_add_participant", "Enroll a participant in a room. Returns the participant id (the handle used to send and poll). role is one of orchestrator|implementer|reviewer|human (default implementer).",
+			`{"type":"object","properties":{"room":{"type":"string"},"name":{"type":"string"},"role":{"type":"string","enum":["orchestrator","implementer","reviewer","human"]}},"required":["room","name"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				if argString(a, "name") == "" {
+					return "", "", nil, fmt.Errorf("name required")
+				}
+				body := map[string]any{"name": a["name"]}
+				if v, ok := a["role"]; ok {
+					body["role"] = v
+				}
+				return http.MethodPost, "/rooms/" + url.PathEscape(room) + "/participants", body, nil
+			}),
+		ch("chat_list_participants", "List the participants of a room.",
+			`{"type":"object","properties":{"room":{"type":"string"}},"required":["room"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(room) + "/participants", nil, nil
+			}),
+		ch("chat_remove_participant", "Remove a participant from a room.",
+			`{"type":"object","properties":{"room":{"type":"string"},"participant":{"type":"string"}},"required":["room","participant"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				p := argString(a, "participant")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("participant required")
+				}
+				return http.MethodDelete, "/rooms/" + url.PathEscape(room) + "/participants/" + url.PathEscape(p), nil, nil
+			}),
+		ch("chat_send_message", "Send a message to a room as a participant. Omit target for a global message, or set target to a participant id for a direct message. kind is one of message|system (default message). Writes to an archived room return 409.",
+			`{"type":"object","properties":{"room":{"type":"string"},"participant_id":{"type":"string"},"body":{"type":"string"},"target":{"type":"string"},"kind":{"type":"string","enum":["message","system"]}},"required":["room","participant_id","body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				if argString(a, "participant_id") == "" {
+					return "", "", nil, fmt.Errorf("participant_id required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{"participant_id": a["participant_id"], "body": a["body"]}
+				if v, ok := a["target"]; ok {
+					body["target"] = v
+				}
+				if v, ok := a["kind"]; ok {
+					body["kind"] = v
+				}
+				return http.MethodPost, "/rooms/" + url.PathEscape(room) + "/messages", body, nil
+			}),
+		ch("chat_poll_messages", "Poll new messages for a participant (advances the read cursor under a row lock, so concurrent polls never double-deliver). Returns messages plus room_status and has_more; when has_more is true, poll again immediately to drain the rest.",
+			`{"type":"object","properties":{"room":{"type":"string"},"participant":{"type":"string"}},"required":["room","participant"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				p := argString(a, "participant")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("participant required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(room) + "/messages?participant=" + url.QueryEscape(p), nil, nil
+			}),
+		ch("chat_get_log", "Read a room's append-only message log, ordered by id. after returns only messages with a greater id (omit or 0 from the beginning); limit caps the page. Returns next, the id to pass as after for the following page, or 0 on the last page.",
+			`{"type":"object","properties":{"room":{"type":"string"},"after":{"type":"integer"},"limit":{"type":"integer"}},"required":["room"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				room := argString(a, "room")
+				if room == "" {
+					return "", "", nil, fmt.Errorf("room required")
+				}
+				q := url.Values{}
+				if v := argString(a, "after"); v != "" {
+					q.Set("after", v)
+				}
+				if v := argString(a, "limit"); v != "" {
+					q.Set("limit", v)
+				}
+				path := "/rooms/" + url.PathEscape(room) + "/log"
+				if len(q) > 0 {
+					path += "?" + q.Encode()
+				}
+				return http.MethodGet, path, nil, nil
 			}),
 	}
 }

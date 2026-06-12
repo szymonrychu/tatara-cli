@@ -90,11 +90,31 @@ func newMCPCmd() *cobra.Command {
 				return err
 			}
 
-			srv := mcp.NewServer(cli, opCli, logger)
+			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
+			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
+			chatCfg := client.Config{
+				BaseURL:   chatBase,
+				Token:     token,
+				TokenPath: tokenPath,
+			}
+			if tokenPath != "" {
+				chatCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+				chatCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
+				}
+				chatCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+			}
+			chatCli, err := client.New(chatCfg)
+			if err != nil {
+				return err
+			}
+
+			srv := mcp.NewServer(cli, opCli, chatCli, logger)
 			return srv.Run(ctx)
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
+	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	return c
 }
 

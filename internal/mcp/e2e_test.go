@@ -43,8 +43,18 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	}))
 	defer operator.Close()
 
+	var chatMethod, chatPath, chatBody string
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatMethod, chatPath = r.Method, r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		chatBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"room-1"}`))
+	}))
+	defer chat.Close()
+
 	srv := NewServer(freshClient(t, memory.URL), freshClient(t, operator.URL),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -64,13 +74,13 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	// returned an error (and zero tools) under the 0.4.x marshalling bug.
 	listRes, err := cli.ListTools(ctx, mcplib.ListToolsRequest{})
 	require.NoError(t, err)
-	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools()))
+	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools()))
 
 	exposed := map[string]bool{}
 	for _, tl := range listRes.Tools {
 		exposed[tl.Name] = true
 	}
-	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue"} {
+	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue", "chat_create_room"} {
 		assert.Truef(t, exposed[want], "tools/list must expose %q", want)
 	}
 
@@ -90,6 +100,14 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	opRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.False(t, opRes.IsError)
 	assert.Equal(t, "/tasks/task-x", opPath)
+
+	// tools/call against the chat backend: confirms target dispatch picks the
+	// chat client and the JSON body is forwarded.
+	chatRes := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "room", "created_by": "agent"})
+	require.False(t, chatRes.IsError)
+	assert.Equal(t, http.MethodPost, chatMethod)
+	assert.Equal(t, "/rooms", chatPath)
+	assert.Contains(t, chatBody, "created_by")
 
 	// A backend error surfaces as an MCP error result, not a transport failure.
 	opFail = true
