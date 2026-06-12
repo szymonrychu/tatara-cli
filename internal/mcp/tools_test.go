@@ -967,4 +967,117 @@ func TestOperatorTools_SCMBodies(t *testing.T) {
 		_, hasComment := m["comment"]
 		require.False(t, hasComment)
 	})
+	t.Run("issue_outcome_discuss", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "discuss", "comment": "need more info",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "discuss", m["action"])
+		require.Equal(t, "need more info", m["comment"])
+	})
+}
+
+func TestIssueOutcome_SchemaContainsDiscuss(t *testing.T) {
+	tl := operatorToolByName(t, "issue_outcome")
+	require.Contains(t, string(tl.Schema), `"discuss"`, "schema enum must include discuss")
+}
+
+func TestSubmitHandover_Build(t *testing.T) {
+	t.Run("explicit task", func(t *testing.T) {
+		m, p, body, err := operatorToolByName(t, "submit_handover").Build(map[string]any{
+			"task": "t1", "handover": "all done, next steps: ...",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t1/handover", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "all done, next steps: ...", bm["handover"])
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "submit_handover").Build(map[string]any{
+			"handover": "ctx",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/handover", p)
+	})
+	t.Run("require handover", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "submit_handover").Build(map[string]any{})
+		require.Error(t, err)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "submit_handover").Build(map[string]any{"handover": "x"})
+		require.Error(t, err)
+	})
+}
+
+func TestChangeSummary_Build(t *testing.T) {
+	t.Run("all fields", func(t *testing.T) {
+		m, p, body, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"task":            "t1",
+			"pr_title":        "feat: add thing",
+			"pr_body":         "## Summary\n- added thing",
+			"delivered_scope": "thing done",
+			"remaining_scope": "cleanup later",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t1/change-summary", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "feat: add thing", bm["pr_title"])
+		require.Equal(t, "## Summary\n- added thing", bm["pr_body"])
+		require.Equal(t, "thing done", bm["delivered_scope"])
+		require.Equal(t, "cleanup later", bm["remaining_scope"])
+	})
+	t.Run("optional remaining_scope absent", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"task":            "t1",
+			"pr_title":        "feat: x",
+			"pr_body":         "body",
+			"delivered_scope": "done",
+		})
+		require.NoError(t, err)
+		bm := body.(map[string]any)
+		_, has := bm["remaining_scope"]
+		require.False(t, has)
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"pr_title": "t", "pr_body": "b", "delivered_scope": "d",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/change-summary", p)
+	})
+	t.Run("require pr_title", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"pr_body": "b", "delivered_scope": "d",
+		})
+		require.Error(t, err)
+	})
+	t.Run("require pr_body", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"pr_title": "t", "delivered_scope": "d",
+		})
+		require.Error(t, err)
+	})
+	t.Run("require delivered_scope", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"pr_title": "t", "pr_body": "b",
+		})
+		require.Error(t, err)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "change_summary").Build(map[string]any{
+			"pr_title": "t", "pr_body": "b", "delivered_scope": "d",
+		})
+		require.Error(t, err)
+	})
 }

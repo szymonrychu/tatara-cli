@@ -453,8 +453,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
-		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR) or close (with a comment).",
-			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close"]},"comment":{"type":"string"}},"required":["action"]}`,
+		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR), close (with a comment), or discuss (post questions/design notes as a comment).",
+			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"}},"required":["action"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
