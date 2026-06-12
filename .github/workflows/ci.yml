@@ -32,6 +32,8 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
+      - name: golangci-lint config verify
+        run: golangci-lint config verify
 
   test:
     runs-on: tatara-cli
