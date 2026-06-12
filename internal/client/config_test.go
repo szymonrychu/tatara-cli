@@ -74,3 +74,10 @@ func TestResolveOperatorBaseURL_Precedence(t *testing.T) {
 	require.Equal(t, "https://file", ResolveOperatorBaseURL("", "", &FileConfig{OperatorBaseURL: "https://file"}))
 	require.Equal(t, DefaultOperatorBaseURL, ResolveOperatorBaseURL("", "", &FileConfig{}))
 }
+
+func TestResolveChatBaseURL_Precedence(t *testing.T) {
+	require.Equal(t, "https://flag", ResolveChatBaseURL("https://flag", "https://env", &FileConfig{ChatBaseURL: "https://file"}))
+	require.Equal(t, "https://env", ResolveChatBaseURL("", "https://env", &FileConfig{ChatBaseURL: "https://file"}))
+	require.Equal(t, "https://file", ResolveChatBaseURL("", "", &FileConfig{ChatBaseURL: "https://file"}))
+	require.Equal(t, DefaultChatBaseURL, ResolveChatBaseURL("", "", &FileConfig{}))
+}

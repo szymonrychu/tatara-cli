@@ -122,6 +122,117 @@ func TestOperatorTools_TargetIsOperator(t *testing.T) {
 	}
 }
 
+func chatToolByName(t *testing.T, name string) Tool {
+	t.Helper()
+	for _, tl := range ChatTools() {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("chat tool %q not found", name)
+	return Tool{}
+}
+
+func TestChatTools_Count(t *testing.T) {
+	require.Len(t, ChatTools(), 10)
+}
+
+func TestChatTools_TargetIsChat(t *testing.T) {
+	for _, tl := range ChatTools() {
+		require.Equal(t, TargetChat, tl.Target)
+	}
+}
+
+func TestChatTools_SchemasAreValidJSON(t *testing.T) {
+	for _, tl := range ChatTools() {
+		var v any
+		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "chat tool %q has invalid JSON schema", tl.Name)
+	}
+}
+
+func TestChatTools_BuildPaths(t *testing.T) {
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		method string
+		path   string
+	}{
+		{"chat_create_room", map[string]any{"name": "impl"}, http.MethodPost, "/rooms"},
+		{"chat_list_rooms", map[string]any{}, http.MethodGet, "/rooms"},
+		{"chat_list_rooms", map[string]any{"status": "active"}, http.MethodGet, "/rooms?status=active"},
+		{"chat_get_room", map[string]any{"room_id": "r1"}, http.MethodGet, "/rooms/r1"},
+		{"chat_close_room", map[string]any{"room_id": "r1"}, http.MethodDelete, "/rooms/r1"},
+		{"chat_add_participant", map[string]any{"room_id": "r1", "name": "bot"}, http.MethodPost, "/rooms/r1/participants"},
+		{"chat_list_participants", map[string]any{"room_id": "r1"}, http.MethodGet, "/rooms/r1/participants"},
+		{"chat_remove_participant", map[string]any{"room_id": "r1", "participant_id": "p1"}, http.MethodDelete, "/rooms/r1/participants/p1"},
+		{"chat_send_message", map[string]any{"room_id": "r1", "participant_id": "p1", "body": "hi"}, http.MethodPost, "/rooms/r1/messages"},
+		{"chat_poll_messages", map[string]any{"room_id": "r1", "participant_id": "p1"}, http.MethodGet, "/rooms/r1/messages?participant=p1"},
+		{"chat_get_log", map[string]any{"room_id": "r1"}, http.MethodGet, "/rooms/r1/log"},
+		{"chat_get_log", map[string]any{"room_id": "r1", "after": float64(5), "limit": float64(20)}, http.MethodGet, "/rooms/r1/log?after=5&limit=20"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			m, p, _, err := chatToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.method, m)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestChatTools_RequireArgs(t *testing.T) {
+	_, _, _, err := chatToolByName(t, "chat_create_room").Build(map[string]any{})
+	require.Error(t, err) // name required
+	_, _, _, err = chatToolByName(t, "chat_get_room").Build(map[string]any{})
+	require.Error(t, err) // room_id required
+	_, _, _, err = chatToolByName(t, "chat_add_participant").Build(map[string]any{"room_id": "r1"})
+	require.Error(t, err) // name required
+	_, _, _, err = chatToolByName(t, "chat_remove_participant").Build(map[string]any{"room_id": "r1"})
+	require.Error(t, err) // participant_id required
+	_, _, _, err = chatToolByName(t, "chat_send_message").Build(map[string]any{"room_id": "r1", "participant_id": "p1"})
+	require.Error(t, err) // body required
+	_, _, _, err = chatToolByName(t, "chat_poll_messages").Build(map[string]any{"room_id": "r1"})
+	require.Error(t, err) // participant_id required
+}
+
+func TestChatTools_Bodies(t *testing.T) {
+	t.Run("create_room", func(t *testing.T) {
+		_, _, body, err := chatToolByName(t, "chat_create_room").Build(map[string]any{"name": "impl", "created_by": "orchestrator"})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "impl", m["name"])
+		require.Equal(t, "orchestrator", m["created_by"])
+	})
+	t.Run("create_room_name_only", func(t *testing.T) {
+		_, _, body, err := chatToolByName(t, "chat_create_room").Build(map[string]any{"name": "impl"})
+		require.NoError(t, err)
+		_, hasCreatedBy := body.(map[string]any)["created_by"]
+		require.False(t, hasCreatedBy)
+	})
+	t.Run("send_message_full", func(t *testing.T) {
+		_, _, body, err := chatToolByName(t, "chat_send_message").Build(map[string]any{
+			"room_id": "r1", "participant_id": "p1", "body": "hi", "target": "p2", "kind": "system",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "p1", m["participant_id"])
+		require.Equal(t, "hi", m["body"])
+		require.Equal(t, "p2", m["target"])
+		require.Equal(t, "system", m["kind"])
+	})
+	t.Run("send_message_minimal", func(t *testing.T) {
+		_, _, body, err := chatToolByName(t, "chat_send_message").Build(map[string]any{
+			"room_id": "r1", "participant_id": "p1", "body": "hi",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		_, hasTarget := m["target"]
+		require.False(t, hasTarget)
+		_, hasKind := m["kind"]
+		require.False(t, hasKind)
+	})
+}
+
 func operatorToolByName(t *testing.T, name string) Tool {
 	t.Helper()
 	for _, tl := range OperatorTools() {

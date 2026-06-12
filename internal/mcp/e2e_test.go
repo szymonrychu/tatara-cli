@@ -16,7 +16,8 @@ import (
 
 // TestE2E_StdioProtocol drives the registered MCP server over the real
 // JSON-RPC protocol (in-process transport): initialize, tools/list, and
-// tools/call against faked tatara-memory and tatara-operator backends.
+// tools/call against faked tatara-memory, tatara-operator, and tatara-chat
+// backends.
 // This is the regression guard the API-level registration tests cannot give:
 // a tools/list marshalling break (see MEMORY.md, the 0.4.x bug) or a
 // dispatch/result mistake surfaces here, not just at the registry level.
@@ -43,8 +44,16 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	}))
 	defer operator.Close()
 
+	var chatMethod, chatPath string
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatMethod, chatPath = r.Method, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"room-1","name":"impl"}`))
+	}))
+	defer chat.Close()
+
 	srv := NewServer(freshClient(t, memory.URL), freshClient(t, operator.URL),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -64,13 +73,13 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	// returned an error (and zero tools) under the 0.4.x marshalling bug.
 	listRes, err := cli.ListTools(ctx, mcplib.ListToolsRequest{})
 	require.NoError(t, err)
-	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools()))
+	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools()))
 
 	exposed := map[string]bool{}
 	for _, tl := range listRes.Tools {
 		exposed[tl.Name] = true
 	}
-	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue"} {
+	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue", "chat_create_room"} {
 		assert.Truef(t, exposed[want], "tools/list must expose %q", want)
 	}
 
@@ -90,6 +99,13 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	opRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.False(t, opRes.IsError)
 	assert.Equal(t, "/tasks/task-x", opPath)
+
+	// tools/call against the chat backend: confirms target dispatch picks the
+	// chat client and routes to the chat REST surface.
+	chatRes := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
+	require.False(t, chatRes.IsError)
+	assert.Equal(t, http.MethodPost, chatMethod)
+	assert.Equal(t, "/rooms", chatPath)
 
 	// A backend error surfaces as an MCP error result, not a transport failure.
 	opFail = true

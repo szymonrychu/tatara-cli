@@ -20,6 +20,7 @@ type Target int
 const (
 	TargetMemory   Target = iota // default: existing tools hit tatara-memory
 	TargetOperator               // operator tools hit tatara-operator
+	TargetChat                   // chat tools hit tatara-chat
 )
 
 // Tool describes a tatara REST operation exposed as an MCP tool.
@@ -467,6 +468,150 @@ func OperatorTools() []Tool {
 					body["comment"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
+			}),
+	}
+}
+
+// ChatTools returns the 10 tatara-chat REST tools (Target=TargetChat). They
+// cover the documented room/participant/message endpoints so an agent driven
+// through `tatara mcp` can run a create -> join -> send -> poll loop.
+func ChatTools() []Tool {
+	chat := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
+		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetChat, Build: build}
+	}
+	return []Tool{
+		chat("chat_create_room", "Create a chat room. Returns the room (with its id).",
+			`{"type":"object","properties":{"name":{"type":"string"},"created_by":{"type":"string"}},"required":["name"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				if argString(a, "name") == "" {
+					return "", "", nil, fmt.Errorf("name required")
+				}
+				body := map[string]any{"name": a["name"]}
+				if v := argString(a, "created_by"); v != "" {
+					body["created_by"] = v
+				}
+				return http.MethodPost, "/rooms", body, nil
+			}),
+		chat("chat_list_rooms", "List chat rooms, optionally filtered by status (active|archived).",
+			`{"type":"object","properties":{"status":{"type":"string","enum":["active","archived"]}}}`,
+			func(a map[string]any) (string, string, any, error) {
+				path := "/rooms"
+				if s := argString(a, "status"); s != "" {
+					path += "?status=" + url.QueryEscape(s)
+				}
+				return http.MethodGet, path, nil, nil
+			}),
+		chat("chat_get_room", "Get a chat room and its participants by room id.",
+			`{"type":"object","properties":{"room_id":{"type":"string"}},"required":["room_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(id), nil, nil
+			}),
+		chat("chat_close_room", "Close (archive) a chat room by id. No further messages can be posted.",
+			`{"type":"object","properties":{"room_id":{"type":"string"}},"required":["room_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				return http.MethodDelete, "/rooms/" + url.PathEscape(id), nil, nil
+			}),
+		chat("chat_add_participant", "Join a chat room. Returns the participant (with its id); use that id to send and poll.",
+			`{"type":"object","properties":{"room_id":{"type":"string"},"name":{"type":"string"},"role":{"type":"string","enum":["orchestrator","implementer","reviewer","human"]}},"required":["room_id","name"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				if argString(a, "name") == "" {
+					return "", "", nil, fmt.Errorf("name required")
+				}
+				body := map[string]any{"name": a["name"]}
+				if v := argString(a, "role"); v != "" {
+					body["role"] = v
+				}
+				return http.MethodPost, "/rooms/" + url.PathEscape(id) + "/participants", body, nil
+			}),
+		chat("chat_list_participants", "List the participants of a chat room.",
+			`{"type":"object","properties":{"room_id":{"type":"string"}},"required":["room_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(id) + "/participants", nil, nil
+			}),
+		chat("chat_remove_participant", "Remove a participant from a chat room.",
+			`{"type":"object","properties":{"room_id":{"type":"string"},"participant_id":{"type":"string"}},"required":["room_id","participant_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				pid := argString(a, "participant_id")
+				if pid == "" {
+					return "", "", nil, fmt.Errorf("participant_id required")
+				}
+				return http.MethodDelete, "/rooms/" + url.PathEscape(id) + "/participants/" + url.PathEscape(pid), nil, nil
+			}),
+		chat("chat_send_message", "Send a message to a chat room as a participant. Set target to a participant id for a direct message; kind defaults to message.",
+			`{"type":"object","properties":{"room_id":{"type":"string"},"participant_id":{"type":"string"},"body":{"type":"string"},"target":{"type":"string"},"kind":{"type":"string","enum":["message","system"]}},"required":["room_id","participant_id","body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				pid := argString(a, "participant_id")
+				if pid == "" {
+					return "", "", nil, fmt.Errorf("participant_id required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{"participant_id": pid, "body": a["body"]}
+				if v := argString(a, "target"); v != "" {
+					body["target"] = v
+				}
+				if v := argString(a, "kind"); v != "" {
+					body["kind"] = v
+				}
+				return http.MethodPost, "/rooms/" + url.PathEscape(id) + "/messages", body, nil
+			}),
+		chat("chat_poll_messages", "Poll for messages addressed to a participant since its last poll (advances the participant's cursor). The response carries room_status and has_more so a loop knows when to stop.",
+			`{"type":"object","properties":{"room_id":{"type":"string"},"participant_id":{"type":"string"}},"required":["room_id","participant_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				pid := argString(a, "participant_id")
+				if pid == "" {
+					return "", "", nil, fmt.Errorf("participant_id required")
+				}
+				return http.MethodGet, "/rooms/" + url.PathEscape(id) + "/messages?participant=" + url.QueryEscape(pid), nil, nil
+			}),
+		chat("chat_get_log", "Read a chat room's full message log (cursor-paginated by sequence). after starts after that sequence; limit caps the page; next is the cursor for the following page.",
+			`{"type":"object","properties":{"room_id":{"type":"string"},"after":{"type":"integer"},"limit":{"type":"integer"}},"required":["room_id"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				id := argString(a, "room_id")
+				if id == "" {
+					return "", "", nil, fmt.Errorf("room_id required")
+				}
+				q := url.Values{}
+				if v := argString(a, "after"); v != "" {
+					q.Set("after", v)
+				}
+				if v := argString(a, "limit"); v != "" {
+					q.Set("limit", v)
+				}
+				path := "/rooms/" + url.PathEscape(id) + "/log"
+				if len(q) > 0 {
+					path += "?" + q.Encode()
+				}
+				return http.MethodGet, path, nil, nil
 			}),
 	}
 }
