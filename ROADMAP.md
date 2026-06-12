@@ -49,7 +49,11 @@ and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
 
 **Status:** planned
 
-- Tighten `.golangci.yml` schema for golangci-lint v2.12+ (current config
-  fails `config verify`; `run` still tolerates the v1 leftovers).
+- [shipped] `.golangci.yml` is strict-v2-clean (no `disable-all` /
+  `exclude-rules` / string `local-prefixes` leftovers); `make lint` and
+  pre-commit now run `golangci-lint config verify` so schema drift fails
+  fast. Remaining (external, `tatara-argo-workflows`): drop the
+  `verify: false` workaround on the CI golangci-lint step once it pins a
+  version recent enough to recognise the configured gosec rules (G117).
 - Drive end-to-end MCP smoke from a test harness once a canonical Go MCP
   client lands.
