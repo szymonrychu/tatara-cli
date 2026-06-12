@@ -453,6 +453,19 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
+		op("submit_handover", "Submit a handover document for the current task so the next agent has full context.",
+			`{"type":"object","properties":{"task":{"type":"string"},"handover":{"type":"string"}},"required":["handover"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "handover") == "" {
+					return "", "", nil, fmt.Errorf("handover required")
+				}
+				body := map[string]any{"handover": a["handover"]}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/handover", body, nil
+			}),
 		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR), close (with a comment), or discuss (post questions/design notes as a comment).",
 			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"}},"required":["action"]}`,
 			func(a map[string]any) (string, string, any, error) {
