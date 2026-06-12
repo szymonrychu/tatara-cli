@@ -22,6 +22,14 @@ func TestRootCmd_HasPersistentFlags(t *testing.T) {
 	root := cmd.NewRootCmd()
 	require.NotNil(t, root.PersistentFlags().Lookup("base-url"))
 	require.NotNil(t, root.PersistentFlags().Lookup("verbose"))
+	require.NotNil(t, root.PersistentFlags().Lookup("project"))
+}
+
+func TestRootCmd_ProjectFlagShorthand(t *testing.T) {
+	root := cmd.NewRootCmd()
+	f := root.PersistentFlags().ShorthandLookup("p")
+	require.NotNil(t, f)
+	require.Equal(t, "project", f.Name)
 }
 
 func TestRootCmd_HelpWorks(t *testing.T) {

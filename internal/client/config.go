@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,6 +31,16 @@ func ResolveBaseURL(flag, env string, file *FileConfig) string {
 		return file.BaseURL
 	}
 	return DefaultBaseURL
+}
+
+// MemoryURLForProject composes the per-project memory base URL.
+// It trims a trailing slash from base, then appends /<project> when project is non-empty.
+func MemoryURLForProject(base, project string) string {
+	base = strings.TrimRight(base, "/")
+	if project == "" {
+		return base
+	}
+	return base + "/" + project
 }
 
 // ResolveOperatorBaseURL returns the first non-empty of: flag, env, file, default.

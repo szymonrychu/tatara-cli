@@ -37,6 +37,8 @@ func newMCPCmd() *cobra.Command {
 				return err
 			}
 			base := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
+			project, _ := cmd.Flags().GetString("project")
+			base = client.MemoryURLForProject(base, project)
 
 			tokenPath, err := auth.DefaultTokenPath()
 			if err != nil {
