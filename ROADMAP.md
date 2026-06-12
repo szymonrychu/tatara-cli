@@ -52,4 +52,7 @@ and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
 - Tighten `.golangci.yml` schema for golangci-lint v2.12+ (current config
   fails `config verify`; `run` still tolerates the v1 leftovers).
 - Drive end-to-end MCP smoke from a test harness once a canonical Go MCP
-  client lands.
+  client lands. **Done:** `internal/mcp/e2e_test.go` drives the server
+  in-process via the mcp-go client (initialize + tools/list + tools/call)
+  against faked memory/operator REST backends; catches the tools/list
+  marshal regression that API-level registration tests miss.
