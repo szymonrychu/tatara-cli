@@ -453,6 +453,32 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
+		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, and optional remaining scope.",
+			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"remaining_scope":{"type":"string"}},"required":["pr_title","pr_body","delivered_scope"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "pr_title") == "" {
+					return "", "", nil, fmt.Errorf("pr_title required")
+				}
+				if argString(a, "pr_body") == "" {
+					return "", "", nil, fmt.Errorf("pr_body required")
+				}
+				if argString(a, "delivered_scope") == "" {
+					return "", "", nil, fmt.Errorf("delivered_scope required")
+				}
+				body := map[string]any{
+					"pr_title":        a["pr_title"],
+					"pr_body":         a["pr_body"],
+					"delivered_scope": a["delivered_scope"],
+				}
+				if v, ok := a["remaining_scope"]; ok {
+					body["remaining_scope"] = v
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/change-summary", body, nil
+			}),
 		op("submit_handover", "Submit a handover document for the current task so the next agent has full context.",
 			`{"type":"object","properties":{"task":{"type":"string"},"handover":{"type":"string"}},"required":["handover"]}`,
 			func(a map[string]any) (string, string, any, error) {
