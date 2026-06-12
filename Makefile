@@ -21,6 +21,7 @@ fmt:
 	goimports -w -local github.com/szymonrychu/tatara-cli .
 
 lint:
+	golangci-lint config verify
 	golangci-lint run ./... || [ $$? -eq 5 ]
 
 test:

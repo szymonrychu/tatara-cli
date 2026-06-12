@@ -25,3 +25,12 @@ repos:
     hooks:
       - id: go-fmt
       - id: golangci-lint
+
+  - repo: local
+    hooks:
+      - id: golangci-lint-config-verify
+        name: golangci-lint config verify
+        entry: golangci-lint config verify
+        language: system
+        files: ^\.golangci\.yml$
+        pass_filenames: false
