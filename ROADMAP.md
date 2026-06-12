@@ -55,5 +55,10 @@ and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
   fast. Remaining (external, `tatara-argo-workflows`): drop the
   `verify: false` workaround on the CI golangci-lint step once it pins a
   version recent enough to recognise the configured gosec rules (G117).
-- Drive end-to-end MCP smoke from a test harness once a canonical Go MCP
-  client lands.
+- [shipped] Drive end-to-end MCP smoke from a test harness.
+  `internal/mcp/e2e_test.go` runs the registered server over the real
+  JSON-RPC protocol via mcp-go's in-process client: initialize +
+  tools/list (asserts the full tool set) + tools/call against faked
+  tatara-memory and tatara-operator backends (success, target dispatch,
+  and backend-error result paths). Guards the 0.4.x tools/list
+  marshalling class of regression that registration-only tests miss.

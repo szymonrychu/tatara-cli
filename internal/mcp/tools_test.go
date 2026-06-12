@@ -45,6 +45,10 @@ func TestOperatorTools_BuildPaths(t *testing.T) {
 }
 
 func TestOperatorTools_RequireArgs(t *testing.T) {
+	// Hermetic: these assert the no-arg/no-env error path, so clear any ambient
+	// TATARA_TASK / TATARA_PROJECT the runtime may have injected.
+	t.Setenv("TATARA_TASK", "")
+	t.Setenv("TATARA_PROJECT", "")
 	_, _, _, err := operatorToolByName(t, "project_get").Build(map[string]any{})
 	require.Error(t, err) // project required
 	_, _, _, err = operatorToolByName(t, "task_get").Build(map[string]any{})
@@ -727,6 +731,10 @@ func TestOperatorTools_SCMBuildPaths(t *testing.T) {
 }
 
 func TestOperatorTools_SCMRequireArgs(t *testing.T) {
+	// Hermetic: clear ambient TATARA_TASK / TATARA_PROJECT so the missing-arg
+	// error paths are exercised regardless of the runtime environment.
+	t.Setenv("TATARA_TASK", "")
+	t.Setenv("TATARA_PROJECT", "")
 	_, _, _, err := operatorToolByName(t, "propose_issue").Build(map[string]any{"repo": "r", "title": "t", "body": "b", "kind": "bug"})
 	require.Error(t, err) // project required (no env set)
 	_, _, _, err = operatorToolByName(t, "propose_issue").Build(map[string]any{"project": "p", "title": "t", "body": "b", "kind": "bug"})
