@@ -56,6 +56,20 @@ chat_get_log) mapping the tatara-chat REST API 1:1. Third client target
 (TargetChat); chat URL wiring via flag(--chat-base-url)/env(TATARA_CHAT_URL)/
 file(chatBaseUrl)/default. Single-token audience assumption as for operator.
 
+## v0.7.0 - lifecycle notification params
+
+**Status:** code-complete 2026-06-13 (issue tatara-claude-code-wrapper#6).
+
+change_summary gains an optional `most_problematic` param and issue_outcome
+gains an optional `plan` param (used when action=implement) so the lifecycle
+agent can supply the implementation-start message and the post-mortem note
+the operator surfaces in the issue thread + MR body. Also fixed a latent bug:
+change_summary POSTed snake_case body keys (pr_title, delivered_scope, ...)
+to the operator, whose changeSummaryReq uses camelCase json tags with
+DisallowUnknownFields - so those fields were silently rejected and the MR fell
+back to the default title/body. Body keys are now camelCase to match the
+operator REST contract.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned

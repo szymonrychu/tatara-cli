@@ -982,6 +982,17 @@ func TestOperatorTools_SCMBodies(t *testing.T) {
 		require.Equal(t, "implement", m["action"])
 		_, hasComment := m["comment"]
 		require.False(t, hasComment)
+		_, hasPlan := m["plan"]
+		require.False(t, hasPlan)
+	})
+	t.Run("issue_outcome_implement_with_plan", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
+			"task": "t1", "action": "implement", "plan": "add field, wire handler, test",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "implement", m["action"])
+		require.Equal(t, "add field, wire handler, test", m["plan"])
 	})
 	t.Run("issue_outcome_discuss", func(t *testing.T) {
 		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
@@ -1033,22 +1044,25 @@ func TestSubmitHandover_Build(t *testing.T) {
 func TestChangeSummary_Build(t *testing.T) {
 	t.Run("all fields", func(t *testing.T) {
 		m, p, body, err := operatorToolByName(t, "change_summary").Build(map[string]any{
-			"task":            "t1",
-			"pr_title":        "feat: add thing",
-			"pr_body":         "## Summary\n- added thing",
-			"delivered_scope": "thing done",
-			"remaining_scope": "cleanup later",
+			"task":             "t1",
+			"pr_title":         "feat: add thing",
+			"pr_body":          "## Summary\n- added thing",
+			"delivered_scope":  "thing done",
+			"remaining_scope":  "cleanup later",
+			"most_problematic": "token refresh race",
 		})
 		require.NoError(t, err)
 		require.Equal(t, http.MethodPost, m)
 		require.Equal(t, "/tasks/t1/change-summary", p)
 		bm := body.(map[string]any)
-		require.Equal(t, "feat: add thing", bm["pr_title"])
-		require.Equal(t, "## Summary\n- added thing", bm["pr_body"])
-		require.Equal(t, "thing done", bm["delivered_scope"])
-		require.Equal(t, "cleanup later", bm["remaining_scope"])
+		// Body keys are the operator's camelCase changeSummaryReq json tags.
+		require.Equal(t, "feat: add thing", bm["prTitle"])
+		require.Equal(t, "## Summary\n- added thing", bm["prBody"])
+		require.Equal(t, "thing done", bm["deliveredScope"])
+		require.Equal(t, "cleanup later", bm["remainingScope"])
+		require.Equal(t, "token refresh race", bm["mostProblematic"])
 	})
-	t.Run("optional remaining_scope absent", func(t *testing.T) {
+	t.Run("optional remaining_scope and most_problematic absent", func(t *testing.T) {
 		_, _, body, err := operatorToolByName(t, "change_summary").Build(map[string]any{
 			"task":            "t1",
 			"pr_title":        "feat: x",
@@ -1057,8 +1071,10 @@ func TestChangeSummary_Build(t *testing.T) {
 		})
 		require.NoError(t, err)
 		bm := body.(map[string]any)
-		_, has := bm["remaining_scope"]
-		require.False(t, has)
+		_, hasRemaining := bm["remainingScope"]
+		require.False(t, hasRemaining)
+		_, hasProblematic := bm["mostProblematic"]
+		require.False(t, hasProblematic)
 	})
 	t.Run("env fallback", func(t *testing.T) {
 		t.Setenv("TATARA_TASK", "env-task")

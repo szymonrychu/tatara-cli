@@ -453,8 +453,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
-		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, and optional remaining scope.",
-			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"remaining_scope":{"type":"string"}},"required":["pr_title","pr_body","delivered_scope"]}`,
+		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, optional remaining scope, and optionally what was most problematic.",
+			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"remaining_scope":{"type":"string"},"most_problematic":{"type":"string","description":"What was most problematic or surprising during implementation (gotchas, dead-ends, tricky integration points). Surfaced in the MR body and recorded in docs."}},"required":["pr_title","pr_body","delivered_scope"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -469,13 +469,18 @@ func OperatorTools() []Tool {
 				if argString(a, "delivered_scope") == "" {
 					return "", "", nil, fmt.Errorf("delivered_scope required")
 				}
+				// Operator REST DTOs are camelCase; map the snake_case tool args to
+				// the changeSummaryReq json keys (it decodes with DisallowUnknownFields).
 				body := map[string]any{
-					"pr_title":        a["pr_title"],
-					"pr_body":         a["pr_body"],
-					"delivered_scope": a["delivered_scope"],
+					"prTitle":        a["pr_title"],
+					"prBody":         a["pr_body"],
+					"deliveredScope": a["delivered_scope"],
 				}
 				if v, ok := a["remaining_scope"]; ok {
-					body["remaining_scope"] = v
+					body["remainingScope"] = v
+				}
+				if v, ok := a["most_problematic"]; ok {
+					body["mostProblematic"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/change-summary", body, nil
 			}),
@@ -493,7 +498,7 @@ func OperatorTools() []Tool {
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/handover", body, nil
 			}),
 		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR), close (with a comment), or discuss (post questions/design notes as a comment).",
-			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"}},"required":["action"]}`,
+			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"},"plan":{"type":"string","description":"When action=implement, a short description of WHAT will be implemented and HOW (flow, key ideas, approach). Posted to the issue as the implementation-start message."}},"required":["action"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -505,6 +510,9 @@ func OperatorTools() []Tool {
 				body := map[string]any{"action": a["action"]}
 				if v, ok := a["comment"]; ok {
 					body["comment"] = v
+				}
+				if v, ok := a["plan"]; ok {
+					body["plan"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
 			}),
