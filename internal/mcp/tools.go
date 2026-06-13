@@ -281,7 +281,7 @@ func argOrEnv(a map[string]any, key, envKey string) string {
 	return os.Getenv(envKey)
 }
 
-// OperatorTools returns the 13 tatara-operator REST tools (Target=TargetOperator).
+// OperatorTools returns the 16 tatara-operator REST tools (Target=TargetOperator).
 func OperatorTools() []Tool {
 	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
 		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetOperator, Build: build}
@@ -515,6 +515,19 @@ func OperatorTools() []Tool {
 					body["plan"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
+			}),
+		op("comment", "Post a free-form comment on the current task's linked issue (answer maintainer questions, post design notes). The operator posts it under the bot identity on the next reconcile and does NOT change the issue's lifecycle state. Use this to keep a discovery conversation alive; use issue_outcome to set the outcome.",
+			`{"type":"object","properties":{"task":{"type":"string"},"body":{"type":"string"}},"required":["body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{"body": a["body"]}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/comment", body, nil
 			}),
 	}
 }
