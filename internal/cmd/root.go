@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -34,4 +35,17 @@ func NewRootCmd() *cobra.Command {
 		newMCPConfigCmd(),
 	)
 	return root
+}
+
+// verboseLevel maps the --verbose count to a slog level, matching the flag's
+// documented behavior (-v info, -vv debug). The default (no flag) is WARN.
+func verboseLevel(count int) slog.Level {
+	switch {
+	case count <= 0:
+		return slog.LevelWarn
+	case count == 1:
+		return slog.LevelInfo
+	default:
+		return slog.LevelDebug
+	}
 }
