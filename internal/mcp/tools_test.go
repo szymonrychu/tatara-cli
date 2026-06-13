@@ -113,7 +113,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 15)
+	require.Len(t, OperatorTools(), 16)
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
@@ -1112,4 +1112,47 @@ func TestChangeSummary_Build(t *testing.T) {
 		})
 		require.Error(t, err)
 	})
+}
+
+func TestCommentToolBuildsTaskScopedPost(t *testing.T) {
+	t.Setenv("TATARA_TASK", "task-xyz")
+	var tool Tool
+	for _, x := range OperatorTools() {
+		if x.Name == "comment" {
+			tool = x
+		}
+	}
+	if tool.Name != "comment" {
+		t.Fatal("comment tool not registered in OperatorTools")
+	}
+	if tool.Target != TargetOperator {
+		t.Fatalf("comment tool target = %v, want TargetOperator", tool.Target)
+	}
+	method, path, body, err := tool.Build(map[string]any{"body": "design note"})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if method != http.MethodPost {
+		t.Fatalf("method = %s, want POST", method)
+	}
+	if path != "/tasks/task-xyz/comment" {
+		t.Fatalf("path = %s, want /tasks/task-xyz/comment", path)
+	}
+	m, ok := body.(map[string]any)
+	if !ok || m["body"] != "design note" {
+		t.Fatalf("body = %#v, want {body: design note}", body)
+	}
+}
+
+func TestCommentToolRequiresBody(t *testing.T) {
+	t.Setenv("TATARA_TASK", "task-xyz")
+	var tool Tool
+	for _, x := range OperatorTools() {
+		if x.Name == "comment" {
+			tool = x
+		}
+	}
+	if _, _, _, err := tool.Build(map[string]any{}); err == nil {
+		t.Fatal("expected error when body missing")
+	}
 }
