@@ -137,6 +137,71 @@ func TestRaw_NonOKExitsNonZero(t *testing.T) {
 	require.Contains(t, err.Error(), "404")
 }
 
+func TestRaw_TargetMemoryAppliesProjectPrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/proj/memories", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--base-url", srv.URL, "--project", "proj", "raw", "--target", "memory", "GET", "/memories"})
+	require.NoError(t, root.Execute())
+}
+
+func TestRaw_TargetOperatorNoProjectPrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/tasks/foo", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	t.Setenv("TATARA_OPERATOR_URL", srv.URL)
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--project", "proj", "raw", "--target", "operator", "GET", "/tasks/foo"})
+	require.NoError(t, root.Execute())
+}
+
+func TestRaw_TargetChatNoProjectPrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/rooms", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	t.Setenv("TATARA_CHAT_URL", srv.URL)
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--project", "proj", "raw", "--target", "chat", "GET", "/rooms"})
+	require.NoError(t, root.Execute())
+}
+
+func TestRaw_InvalidTargetErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"raw", "--target", "bogus", "GET", "/x"})
+	err := root.Execute()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid --target")
+}
+
 func TestRaw_NoTokenSurfacesErrNoToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
