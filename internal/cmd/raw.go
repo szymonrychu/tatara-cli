@@ -16,9 +16,10 @@ import (
 
 func newRawCmd() *cobra.Command {
 	var dataFlag string
+	var targetFlag string
 	cmd := &cobra.Command{
 		Use:   "raw VERB PATH",
-		Short: "Authenticated REST passthrough to tatara-memory.",
+		Short: "Authenticated REST passthrough to a tatara backend (memory, operator, or chat).",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			verb := strings.ToUpper(args[0])
@@ -34,9 +35,20 @@ func newRawCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			base := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
-			project, _ := cmd.Flags().GetString("project")
-			base = client.MemoryURLForProject(base, project)
+
+			var base string
+			switch targetFlag {
+			case "memory":
+				base = client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
+				project, _ := cmd.Flags().GetString("project")
+				base = client.MemoryURLForProject(base, project)
+			case "operator":
+				base = client.ResolveOperatorBaseURL("", os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
+			case "chat":
+				base = client.ResolveChatBaseURL("", os.Getenv("TATARA_CHAT_URL"), fileCfg)
+			default:
+				return fmt.Errorf("invalid --target %q: must be one of memory, operator, chat", targetFlag)
+			}
 
 			tokenPath, err := auth.DefaultTokenPath()
 			if err != nil {
@@ -102,5 +114,6 @@ func newRawCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&dataFlag, "data", "d", "", "Request body (literal JSON, @file, or - for stdin)")
+	cmd.Flags().StringVar(&targetFlag, "target", "memory", "Backend to call: memory, operator, or chat")
 	return cmd
 }

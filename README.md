@@ -22,6 +22,9 @@ tatara login
 # call any tatara-memory endpoint
 tatara raw GET /memories
 
+# call the operator or chat backend with the same auth
+tatara raw --target operator GET /tasks/foo
+
 # start the MCP stdio server (for Claude Code integration)
 tatara mcp
 
