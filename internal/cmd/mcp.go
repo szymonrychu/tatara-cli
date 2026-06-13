@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
 	"github.com/szymonrychu/tatara-cli/internal/mcp"
 )
@@ -40,71 +38,26 @@ func newMCPCmd() *cobra.Command {
 			project, _ := cmd.Flags().GetString("project")
 			base = client.MemoryURLForProject(base, project)
 
-			tokenPath, err := auth.DefaultTokenPath()
+			token, tokenPath, err := loadToken(ctx)
 			if err != nil {
 				return err
 			}
-			token, err := auth.LoadToken(tokenPath)
-			if err != nil {
-				tokStr, ccErr := auth.AccessToken(ctx)
-				if ccErr != nil {
-					return ccErr
-				}
-				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
-				tokenPath = ""
-			}
 
-			cliCfg := client.Config{
-				BaseURL:   base,
-				Token:     token,
-				TokenPath: tokenPath,
-			}
-			if tokenPath != "" {
-				cliCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				cliCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				cliCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
-			cli, err := client.New(cliCfg)
+			cli, err := buildClient(base, token, tokenPath)
 			if err != nil {
 				return err
 			}
 
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
-			opCfg := client.Config{
-				BaseURL:   opBase,
-				Token:     token,
-				TokenPath: tokenPath,
-			}
-			if tokenPath != "" {
-				opCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				opCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				opCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
-			opCli, err := client.New(opCfg)
+			opCli, err := buildClient(opBase, token, tokenPath)
 			if err != nil {
 				return err
 			}
 
 			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
 			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
-			chatCfg := client.Config{
-				BaseURL:   chatBase,
-				Token:     token,
-				TokenPath: tokenPath,
-			}
-			if tokenPath != "" {
-				chatCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				chatCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				chatCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
-			chatCli, err := client.New(chatCfg)
+			chatCli, err := buildClient(chatBase, token, tokenPath)
 			if err != nil {
 				return err
 			}

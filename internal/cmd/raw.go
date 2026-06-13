@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
 )
 
@@ -38,18 +36,9 @@ func newRawCmd() *cobra.Command {
 			project, _ := cmd.Flags().GetString("project")
 			base = client.MemoryURLForProject(base, project)
 
-			tokenPath, err := auth.DefaultTokenPath()
+			token, tokenPath, err := loadToken(ctx)
 			if err != nil {
 				return err
-			}
-			token, err := auth.LoadToken(tokenPath)
-			if err != nil {
-				tokStr, ccErr := auth.AccessToken(ctx)
-				if ccErr != nil {
-					return ccErr
-				}
-				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
-				tokenPath = ""
 			}
 
 			var body io.Reader
@@ -69,19 +58,7 @@ func newRawCmd() *cobra.Command {
 				body = strings.NewReader(dataFlag)
 			}
 
-			cfg := client.Config{
-				BaseURL:   base,
-				Token:     token,
-				TokenPath: tokenPath,
-			}
-			if tokenPath != "" {
-				cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				cfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				cfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
-			cli, err := client.New(cfg)
+			cli, err := buildClient(base, token, tokenPath)
 			if err != nil {
 				return err
 			}
