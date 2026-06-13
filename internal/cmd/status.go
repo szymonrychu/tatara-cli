@@ -1,0 +1,94 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/szymonrychu/tatara-cli/internal/auth"
+	"github.com/szymonrychu/tatara-cli/internal/client"
+)
+
+func newStatusCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "status",
+		Short: "Show local auth state and the resolved backend base URLs (no network calls).",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+
+			tokenPath, err := auth.DefaultTokenPath()
+			if err != nil {
+				return err
+			}
+
+			token, err := auth.LoadToken(tokenPath)
+			switch {
+			case err == nil:
+				_, _ = fmt.Fprintf(out, "Auth:     logged in (token %s)\n", expiryDesc(token.ExpiresAt))
+			case errors.Is(err, auth.ErrNoToken):
+				if clientCredsConfigured() {
+					_, _ = fmt.Fprintln(out, "Auth:     client-credentials configured")
+				} else {
+					_, _ = fmt.Fprintf(out, "Auth:     not authenticated (%s)\n", auth.ErrNoToken)
+				}
+			default:
+				return err
+			}
+
+			configPath, err := client.DefaultConfigPath()
+			if err != nil {
+				return err
+			}
+			fileCfg, err := client.LoadConfig(configPath)
+			if err != nil {
+				return err
+			}
+
+			baseFlag, _ := cmd.Flags().GetString("base-url")
+			project, _ := cmd.Flags().GetString("project")
+			memBase := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
+			memBase = client.MemoryURLForProject(memBase, project)
+
+			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
+			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
+
+			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
+			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
+
+			if project == "" {
+				project = "(none)"
+			}
+			_, _ = fmt.Fprintf(out, "Project:  %s\n", project)
+			_, _ = fmt.Fprintf(out, "Token:    %s\n", tokenPath)
+			_, _ = fmt.Fprintf(out, "Memory:   %s\n", memBase)
+			_, _ = fmt.Fprintf(out, "Operator: %s\n", opBase)
+			_, _ = fmt.Fprintf(out, "Chat:     %s\n", chatBase)
+			return nil
+		},
+	}
+	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
+	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
+	return c
+}
+
+// expiryDesc describes how long until or since a token expires, without a
+// network call. Mirrors the human phrasing in the task spec.
+func expiryDesc(exp time.Time) string {
+	d := time.Until(exp).Round(time.Second)
+	if d > 0 {
+		return "valid for " + d.String()
+	}
+	return "expired " + (-d).String() + " ago"
+}
+
+// clientCredsConfigured reports whether the three client_credentials env vars
+// are all set, mirroring the check auth.AccessToken uses.
+func clientCredsConfigured() bool {
+	return os.Getenv("OIDC_ISSUER") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
+}

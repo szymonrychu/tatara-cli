@@ -19,6 +19,9 @@ brew install tatara
 # authenticate (OIDC device flow)
 tatara login
 
+# show local auth state and resolved backend URLs (no network calls)
+tatara status
+
 # call any tatara-memory endpoint
 tatara raw GET /memories
 
