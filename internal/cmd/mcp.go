@@ -21,7 +21,8 @@ func newMCPCmd() *cobra.Command {
 		Short: "Run the tatara MCP server over stdio.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			logger, closer, err := mcpLogger()
+			verbose, _ := cmd.Flags().GetCount("verbose")
+			logger, closer, err := mcpLogger(verboseLevel(verbose))
 			if err != nil {
 				return err
 			}
@@ -118,7 +119,7 @@ func newMCPCmd() *cobra.Command {
 	return c
 }
 
-func mcpLogger() (*slog.Logger, io.Closer, error) {
+func mcpLogger(level slog.Level) (*slog.Logger, io.Closer, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
 		h, err := os.UserHomeDir()
@@ -135,5 +136,5 @@ func mcpLogger() (*slog.Logger, io.Closer, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("mcp: open log: %w", err)
 	}
-	return slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{Level: slog.LevelInfo})), f, nil
+	return slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{Level: level})), f, nil
 }
