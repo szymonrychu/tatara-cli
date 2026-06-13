@@ -15,7 +15,7 @@ func TestRootCmd_RegistersAllSubcommands(t *testing.T) {
 	for _, c := range root.Commands() {
 		names = append(names, c.Name())
 	}
-	require.ElementsMatch(t, []string{"login", "logout", "raw", "mcp", "mcp-config"}, names)
+	require.ElementsMatch(t, []string{"login", "logout", "raw", "mcp", "mcp-config", "status"}, names)
 }
 
 func TestRootCmd_HasPersistentFlags(t *testing.T) {
