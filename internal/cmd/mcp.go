@@ -15,6 +15,28 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/mcp"
 )
 
+// resolveMCPToken loads credentials for the MCP server without failing when
+// none are present. Static MCP capabilities (tools/list) need no auth; only
+// actual backend calls do. With no stored token and no client-credentials it
+// returns a nil token so the server still starts and advertises its tools;
+// individual tool invocations then fail until credentials exist.
+func resolveMCPToken(ctx context.Context, logger *slog.Logger) (*auth.Token, string) {
+	tokenPath, err := auth.DefaultTokenPath()
+	if err != nil {
+		logger.Warn("mcp: cannot resolve token path; starting unauthenticated", "reason", err.Error())
+		return nil, ""
+	}
+	if token, lerr := auth.LoadToken(tokenPath); lerr == nil {
+		return token, tokenPath
+	}
+	tokStr, ccErr := auth.AccessToken(ctx)
+	if ccErr != nil {
+		logger.Warn("mcp: no credentials; starting unauthenticated, tool calls fail until `tatara login` or OIDC env is set", "reason", ccErr.Error())
+		return nil, ""
+	}
+	return &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}, ""
+}
+
 func newMCPCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "mcp",
@@ -41,19 +63,7 @@ func newMCPCmd() *cobra.Command {
 			project, _ := cmd.Flags().GetString("project")
 			base = client.MemoryURLForProject(base, project)
 
-			tokenPath, err := auth.DefaultTokenPath()
-			if err != nil {
-				return err
-			}
-			token, err := auth.LoadToken(tokenPath)
-			if err != nil {
-				tokStr, ccErr := auth.AccessToken(ctx)
-				if ccErr != nil {
-					return ccErr
-				}
-				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
-				tokenPath = ""
-			}
+			token, tokenPath := resolveMCPToken(ctx, logger)
 
 			cliCfg := client.Config{
 				BaseURL:   base,
