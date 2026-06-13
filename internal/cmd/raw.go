@@ -16,16 +16,16 @@ import (
 
 func newRawCmd() *cobra.Command {
 	var dataFlag string
+	var target string
 	cmd := &cobra.Command{
 		Use:   "raw VERB PATH",
-		Short: "Authenticated REST passthrough to tatara-memory.",
+		Short: "Authenticated REST passthrough to a tatara backend.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			verb := strings.ToUpper(args[0])
 			path := args[1]
 			ctx := cmd.Context()
 
-			baseFlag, _ := cmd.Flags().GetString("base-url")
 			configPath, err := client.DefaultConfigPath()
 			if err != nil {
 				return err
@@ -34,9 +34,11 @@ func newRawCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			base := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
-			project, _ := cmd.Flags().GetString("project")
-			base = client.MemoryURLForProject(base, project)
+
+			base, err := rawBaseURL(cmd, target, fileCfg)
+			if err != nil {
+				return err
+			}
 
 			tokenPath, err := auth.DefaultTokenPath()
 			if err != nil {
@@ -102,5 +104,29 @@ func newRawCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&dataFlag, "data", "d", "", "Request body (literal JSON, @file, or - for stdin)")
+	cmd.Flags().StringVar(&target, "target", "memory", "backend to target: memory, operator, or chat")
+	cmd.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
+	cmd.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	return cmd
+}
+
+// rawBaseURL resolves the base URL for the selected target. memory honours the
+// persistent --base-url/--project flags; operator and chat use their own
+// --*-base-url flag, env var and config file.
+func rawBaseURL(cmd *cobra.Command, target string, fileCfg *client.FileConfig) (string, error) {
+	switch target {
+	case "memory", "":
+		baseFlag, _ := cmd.Flags().GetString("base-url")
+		base := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
+		project, _ := cmd.Flags().GetString("project")
+		return client.MemoryURLForProject(base, project), nil
+	case "operator":
+		opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
+		return client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg), nil
+	case "chat":
+		chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
+		return client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg), nil
+	default:
+		return "", fmt.Errorf("raw: unknown target %q (want memory, operator, or chat)", target)
+	}
 }

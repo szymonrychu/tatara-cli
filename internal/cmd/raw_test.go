@@ -119,6 +119,58 @@ func TestRaw_POSTWithStdinBody(t *testing.T) {
 	require.Equal(t, `{"text":"from-stdin"}`, got)
 }
 
+func TestRaw_TargetOperator(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		require.Equal(t, "/tasks", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"raw", "--target", "operator", "--operator-base-url", srv.URL, "GET", "/tasks"})
+	require.NoError(t, root.Execute())
+	require.True(t, hit)
+}
+
+func TestRaw_TargetChat(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		require.Equal(t, "/rooms", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"raw", "--target", "chat", "--chat-base-url", srv.URL, "GET", "/rooms"})
+	require.NoError(t, root.Execute())
+	require.True(t, hit)
+}
+
+func TestRaw_UnknownTargetErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"raw", "--target", "bogus", "GET", "/x"})
+	err := root.Execute()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown target")
+}
+
 func TestRaw_NonOKExitsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

@@ -19,8 +19,12 @@ brew install tatara
 # authenticate (OIDC device flow)
 tatara login
 
-# call any tatara-memory endpoint
+# call any tatara-memory endpoint (default target)
 tatara raw GET /memories
+
+# target the operator or chat backend instead
+tatara raw --target operator GET /tasks
+tatara raw --target chat GET /rooms
 
 # start the MCP stdio server (for Claude Code integration)
 tatara mcp
