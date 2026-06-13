@@ -90,7 +90,7 @@ func AllTools() []Tool {
 		{
 			Name:        "query",
 			Description: "Retrieve memory references for the given query.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive","mix","bypass"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/queries", a, nil
 			},
@@ -98,7 +98,7 @@ func AllTools() []Tool {
 		{
 			Name:        "describe",
 			Description: "Generative answer plus source paths for the given query.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string"},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/queries:describe", a, nil
 			},

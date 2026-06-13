@@ -390,6 +390,22 @@ func toolByName(t *testing.T, name string) Tool {
 	return Tool{}
 }
 
+// TestQueryDescribe_ModeEnumMatchesBackend verifies the query/describe mode
+// enums only advertise modes the tatara-memory /queries backend accepts. The
+// backend rejects anything outside {local,global,hybrid,naive} with a 400
+// "invalid mode", so advertising mix/bypass made the tool unusable for those.
+func TestQueryDescribe_ModeEnumMatchesBackend(t *testing.T) {
+	for _, name := range []string{"query", "describe"} {
+		schema := string(toolByName(t, name).Schema)
+		for _, valid := range []string{"local", "global", "hybrid", "naive"} {
+			require.Contains(t, schema, `"`+valid+`"`, "%s schema must advertise %q", name, valid)
+		}
+		for _, invalid := range []string{"mix", "bypass"} {
+			require.NotContains(t, schema, `"`+invalid+`"`, "%s schema must not advertise backend-rejected mode %q", name, invalid)
+		}
+	}
+}
+
 // TestDeleteEdge_OpaqueIDInPath verifies that an opaque base64url ID is placed
 // verbatim in the URL path (url.PathEscape does not alter base64url characters).
 func TestDeleteEdge_OpaqueIDInPath(t *testing.T) {
