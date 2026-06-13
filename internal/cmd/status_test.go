@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,12 +61,15 @@ func TestStatus_AuthStates(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", dir)
 			tc.setup(t, dir)
 
-			out := runStatus(t)
+			// Assert only against the "Auth:" line: t.TempDir() bakes the
+			// subtest name into the token path, so checking the whole output
+			// for substrings like "client-credentials" would match the path.
+			authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
 			for _, want := range tc.wantContain {
-				require.Contains(t, out, want)
+				require.Contains(t, authLine, want)
 			}
 			for _, absent := range tc.wantAbsent {
-				require.NotContains(t, out, absent)
+				require.NotContains(t, authLine, absent)
 			}
 		})
 	}
