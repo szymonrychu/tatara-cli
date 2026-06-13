@@ -387,7 +387,7 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPatch, "/subtasks/" + url.PathEscape(st), body, nil
 			}),
-		op("propose_issue", "Propose a new SCM issue for a deferred bug or improvement; created behind the awaiting-approval label until a human approves.",
+		op("propose_issue", "Propose a new SCM issue (bug or improvement). The operator opens it under the bot identity as an idea-labelled discovery issue; it stays in discussion until a human approves. Embed <!-- tatara-authored --> in the body to keep it in discovery.",
 			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"repositoryRef":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]}},"required":["title","body","kind","repo"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
