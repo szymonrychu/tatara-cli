@@ -81,6 +81,7 @@ spec:
             - --build-arg=DATE=${BUILD_DATE}
             - --compressed-caching=false
             - --cache-copy-layers=true
+            - --kaniko-dir=/kaniko-work
           env:
             - name: GIT_USERNAME
               valueFrom:
@@ -90,13 +91,24 @@ spec:
                 secretKeyRef: { name: ${CLONE_SECRET}, key: token }
           volumeMounts:
             - name: docker-config
-              mountPath: /kaniko/.docker
+              mountPath: /kaniko-work/.docker
+            - name: kaniko-work
+              mountPath: /kaniko-work
       volumes:
         - name: docker-config
           secret:
             secretName: ${DOCKERCFG_SECRET}
             items:
               - { key: .dockerconfigjson, path: config.json }
+        - name: kaniko-work
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                storageClassName: rook-ceph
+                resources:
+                  requests:
+                    storage: 50Gi
 EOF
 
 # Wait for the pod to start, stream kaniko logs, then poll the Job to a terminal
