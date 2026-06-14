@@ -91,7 +91,7 @@ spec:
                 secretKeyRef: { name: ${CLONE_SECRET}, key: token }
           volumeMounts:
             - name: docker-config
-              mountPath: /kaniko/.docker
+              mountPath: /kaniko-work/.docker
             - name: kaniko-work
               mountPath: /kaniko-work
       volumes:
