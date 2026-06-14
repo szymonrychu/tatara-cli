@@ -34,3 +34,11 @@ repos:
         language: system
         files: ^\.golangci\.yml$
         pass_filenames: false
+
+      - id: go-test
+        name: go test (mise)
+        entry: mise run test
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        types: [go]
