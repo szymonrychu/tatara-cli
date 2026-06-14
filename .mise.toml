@@ -1,0 +1,15 @@
+[tools]
+go = "1.25.5"
+golangci-lint = "2.12.2"
+
+[env]
+GOFLAGS = "-count=1"
+
+[tasks.lint]
+run = "make lint"
+
+[tasks.test]
+run = "make test"
+
+[tasks.build]
+run = "make build"
