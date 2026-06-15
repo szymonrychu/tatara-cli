@@ -43,9 +43,9 @@ func newRawCmd() *cobra.Command {
 				project, _ := cmd.Flags().GetString("project")
 				base = client.MemoryURLForProject(base, project)
 			case "operator":
-				base = client.ResolveOperatorBaseURL("", os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
+				base = client.ResolveOperatorBaseURL(baseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			case "chat":
-				base = client.ResolveChatBaseURL("", os.Getenv("TATARA_CHAT_URL"), fileCfg)
+				base = client.ResolveChatBaseURL(baseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
 			default:
 				return fmt.Errorf("invalid --target %q: must be one of memory, operator, chat", targetFlag)
 			}
@@ -69,7 +69,13 @@ func newRawCmd() *cobra.Command {
 			case dataFlag == "":
 				body = nil
 			case dataFlag == "-":
-				body = cmd.InOrStdin()
+				in := cmd.InOrStdin()
+				if f, ok := in.(*os.File); ok {
+					if fi, err := f.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+						return fmt.Errorf("raw: stdin is a terminal; pipe data or use -d @file or -d '<json>'")
+					}
+				}
+				body = in
 			case strings.HasPrefix(dataFlag, "@"):
 				f, err := os.Open(dataFlag[1:])
 				if err != nil {

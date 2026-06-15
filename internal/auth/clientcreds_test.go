@@ -83,7 +83,29 @@ func TestClientCredentialsTokenDiscoveryNon200(t *testing.T) {
 	require.Contains(t, err.Error(), "502", "error should mention the HTTP status")
 }
 
-// Finding 3: ClientCredentialsToken must respect context cancellation (proves it does not
+// Finding: ClientCredsConfigured is the single source of truth for env-var presence.
+func TestClientCredsConfigured(t *testing.T) {
+	t.Run("all set", func(t *testing.T) {
+		t.Setenv("OIDC_ISSUER", "https://issuer.example")
+		t.Setenv("CLI_OIDC_CLIENT_ID", "id")
+		t.Setenv("CLI_OIDC_CLIENT_SECRET", "secret")
+		require.True(t, auth.ClientCredsConfigured())
+	})
+	t.Run("missing secret", func(t *testing.T) {
+		t.Setenv("OIDC_ISSUER", "https://issuer.example")
+		t.Setenv("CLI_OIDC_CLIENT_ID", "id")
+		t.Setenv("CLI_OIDC_CLIENT_SECRET", "")
+		require.False(t, auth.ClientCredsConfigured())
+	})
+	t.Run("all empty", func(t *testing.T) {
+		t.Setenv("OIDC_ISSUER", "")
+		t.Setenv("CLI_OIDC_CLIENT_ID", "")
+		t.Setenv("CLI_OIDC_CLIENT_SECRET", "")
+		require.False(t, auth.ClientCredsConfigured())
+	})
+}
+
+// Finding: ClientCredentialsToken must respect context cancellation (proves it does not
 // use http.DefaultClient with no timeout: a hung server + cancelled ctx must return promptly).
 func TestClientCredentialsTokenRespectsContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

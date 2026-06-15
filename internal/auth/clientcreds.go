@@ -101,6 +101,15 @@ func ResetTokenCache() {
 	ccMu.Unlock()
 }
 
+// ClientCredsConfigured reports whether the three env vars required for the
+// client_credentials grant are all non-empty. This is the single authoritative
+// definition; status.go calls this instead of re-encoding the var names.
+func ClientCredsConfigured() bool {
+	return os.Getenv("OIDC_ISSUER") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
+}
+
 // loadStoredAccessToken reads the default token path and returns the access token
 // string, or an empty string if none is stored.
 func loadStoredAccessToken() (string, error) {

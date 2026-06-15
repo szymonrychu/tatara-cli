@@ -37,14 +37,20 @@ func newMCPConfigCmd() *cobra.Command {
 			if servers == nil {
 				servers = map[string]any{}
 			}
-			if existing, ok := servers["tatara"].(map[string]any); ok && !force {
-				if existing["command"] != abs {
+			if existing, ok := servers["tatara"].(map[string]any); ok {
+				if !force && existing["command"] != abs {
 					return fmt.Errorf("mcp-config: %s already has a tatara entry pointing at %v; pass --force to overwrite", path, existing["command"])
 				}
-			}
-			servers["tatara"] = map[string]any{
-				"command": abs,
-				"args":    []string{"mcp"},
+				// Merge: preserve user-added keys (env, cwd, timeout, etc.);
+				// only update command and args so we don't discard hand-edited fields.
+				existing["command"] = abs
+				existing["args"] = []string{"mcp"}
+				servers["tatara"] = existing
+			} else {
+				servers["tatara"] = map[string]any{
+					"command": abs,
+					"args":    []string{"mcp"},
+				}
 			}
 			cfg["mcpServers"] = servers
 
