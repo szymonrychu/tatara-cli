@@ -25,6 +25,7 @@ linters:
         - G304
         - G115
         - G117
+        # gosec bump added G703-G705 taint-analysis rules that flag pre-existing internal/auth/clientcreds.go (already nolint-justified); excluded to keep `golangci-lint run ./...` green.
         - G703
         - G704
         - G705

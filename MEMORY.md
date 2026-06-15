@@ -24,6 +24,8 @@ Format: `YYYY-MM-DD - decision/finding`
 2026-06-13 - change_summary tool POSTed snake_case body keys (pr_title, pr_body, delivered_scope, remaining_scope) but the operator changeSummaryReq json tags are camelCase and decodeJSON sets DisallowUnknownFields, so those fields were silently rejected (lifecycle fell back to default MR title/body). Fixed: tool args stay snake_case (agent-facing), Build maps them to camelCase body keys. Single-word tools (issue_outcome/pr_outcome) were unaffected since their keys collide. Added most_problematic (change_summary) + plan (issue_outcome) for issue#6 lifecycle notifications.
 
 ## Dead-ends / things tried that did not work
+2026-06-13 - gosec G703-G705 taint-analysis rules excluded in .golangci.yml - flag pre-existing internal/auth/clientcreds.go (already nolint-justified).
+
 
 2026-05-27 - golangci-lint-action@v6 cannot install golangci-lint v2 (must use @v7); v2.1.6 was built with go1.24 and refuses go1.25 modules; v2.12.x tightened config schema and rejects our legacy `disable-all` / `exclude-rules` / string `local-prefixes`. Stable config: golangci-lint v2.11.4 via action@v7 with `verify: false`. Fixing the config to be strict-v2-clean is a v0.1.1 boy-scout task.
 

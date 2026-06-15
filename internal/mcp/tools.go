@@ -281,7 +281,7 @@ func argOrEnv(a map[string]any, key, envKey string) string {
 	return os.Getenv(envKey)
 }
 
-// OperatorTools returns the 16 tatara-operator REST tools (Target=TargetOperator).
+// OperatorTools returns the tatara-operator REST tools (Target=TargetOperator).
 func OperatorTools() []Tool {
 	op := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
 		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetOperator, Build: build}
