@@ -180,6 +180,51 @@ func TestDeviceFlowAccessDenied(t *testing.T) {
 	require.ErrorIs(t, err, auth.ErrAccessDenied)
 }
 
+// Finding 4: Poll must return the 'device code expired' sentinel (not a raw server error)
+// when the deadline has passed. With the deadline check moved to the top of the loop, an
+// already-expired code yields ErrDeviceExpired without making a network call.
+func TestDeviceFlowExpiredCodeYieldsExpiredError(t *testing.T) {
+	var exchanges atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/protocol/openid-connect/auth/device":
+			respondJSON(w, http.StatusOK, map[string]any{
+				"device_code": "dc-exp",
+				"user_code":   "EX-PI",
+				"expires_in":  1, // 1 second
+				"interval":    0,
+			})
+		case "/protocol/openid-connect/token":
+			exchanges.Add(1)
+			// Server returns expired_token to simulate a real Keycloak response.
+			respondJSON(w, http.StatusBadRequest, map[string]any{"error": "expired_token"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	df := &auth.DeviceFlow{
+		HTTP:         srv.Client(),
+		Issuer:       srv.URL,
+		ClientID:     "test-client",
+		Scope:        "test",
+		TickOverride: time.Millisecond,
+	}
+
+	dc, err := df.Start(context.Background())
+	require.NoError(t, err)
+
+	// Manually set ExpiresIn to 0 so deadline is already in the past when Poll starts.
+	dc.ExpiresIn = 0
+
+	_, err = df.Poll(context.Background(), dc)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expired", "should surface 'expired' sentinel, not raw server error")
+	// With deadline check at top of loop, no exchange should occur.
+	require.Equal(t, int32(0), exchanges.Load(), "no exchange should happen when deadline already passed")
+}
+
 func TestDeviceFlowContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

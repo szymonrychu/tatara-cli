@@ -100,3 +100,43 @@ func TestMCPConfig_SameCommandIsIdempotent(t *testing.T) {
 	root2.SetArgs([]string{"mcp-config", dir})
 	require.NoError(t, root2.Execute())
 }
+
+// Finding 4: mcp-config must preserve user-added keys (env, timeout, cwd) when the
+// command matches and no --force is given.
+func TestMCPConfig_PreservesExtraKeysOnSameCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	// First write so we know the real binary path.
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"mcp-config", dir})
+	require.NoError(t, root.Execute())
+
+	// Now hand-add extra keys to the tatara entry.
+	raw, err := os.ReadFile(filepath.Join(dir, ".mcp.json")) //nolint:gosec // test temp dir
+	require.NoError(t, err)
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+	servers := cfg["mcpServers"].(map[string]any)
+	tatara := servers["tatara"].(map[string]any)
+	tatara["env"] = map[string]any{"TATARA_PROJECT": "myproject"}
+	tatara["timeout"] = 30
+	servers["tatara"] = tatara
+	cfg["mcpServers"] = servers
+	out, _ := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".mcp.json"), append(out, '\n'), 0o644)) //nolint:gosec // test temp dir
+
+	// Run mcp-config again - same binary, no --force.
+	root2 := cmd.NewRootCmd()
+	root2.SetArgs([]string{"mcp-config", dir})
+	require.NoError(t, root2.Execute())
+
+	// Verify extra keys survived.
+	raw2, err := os.ReadFile(filepath.Join(dir, ".mcp.json")) //nolint:gosec // test temp dir
+	require.NoError(t, err)
+	var cfg2 map[string]any
+	require.NoError(t, json.Unmarshal(raw2, &cfg2))
+	servers2 := cfg2["mcpServers"].(map[string]any)
+	tatara2 := servers2["tatara"].(map[string]any)
+	require.NotNil(t, tatara2["env"], "user-added env key must be preserved")
+	require.NotNil(t, tatara2["timeout"], "user-added timeout key must be preserved")
+}

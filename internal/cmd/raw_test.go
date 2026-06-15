@@ -190,6 +190,69 @@ func TestRaw_TargetChatNoProjectPrefix(t *testing.T) {
 	require.NoError(t, root.Execute())
 }
 
+// Finding 2: --base-url must apply to operator and chat targets, not just memory.
+func TestRaw_BaseURLAppliedToOperatorTarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--base-url", srv.URL, "raw", "--target", "operator", "GET", "/tasks"})
+	require.NoError(t, root.Execute())
+	require.True(t, hit, "--base-url should route the operator target to the supplied URL")
+}
+
+func TestRaw_BaseURLAppliedToChatTarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--base-url", srv.URL, "raw", "--target", "chat", "GET", "/rooms"})
+	require.NoError(t, root.Execute())
+	require.True(t, hit, "--base-url should route the chat target to the supplied URL")
+}
+
+// Finding 5: passing -d - when stdin is a non-TTY pipe must work (the happy-path
+// already covered by TestRaw_POSTWithStdinBody). The TTY guard only blocks real
+// terminal stdin; in tests cmd.InOrStdin() returns a *bytes.Buffer (not *os.File)
+// so the type-assert to *os.File will be false and body is set without error.
+func TestRaw_StdinNonFileReaderPassesThrough(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = strings.TrimSpace(string(b))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	root.SetIn(strings.NewReader(`{"from":"reader"}`))
+	root.SetArgs([]string{"--base-url", srv.URL, "raw", "POST", "/x", "-d", "-"})
+	require.NoError(t, root.Execute())
+	require.Equal(t, `{"from":"reader"}`, got)
+}
+
 func TestRaw_InvalidTargetErrors(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

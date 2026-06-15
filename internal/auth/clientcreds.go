@@ -13,16 +13,23 @@ import (
 	"time"
 )
 
+// ccHTTPClient is a shared http.Client with a per-request timeout, matching
+// the timeout used by device_flow.go and refresh.go.
+var ccHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // ClientCredentialsToken performs an OIDC client_credentials grant against the
 // issuer's discovered token endpoint and returns the access token + expiry.
 func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret string) (string, time.Time, error) {
 	disco := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, disco, nil) //nolint:gosec // issuer URL is operator-injected env
-	resp, err := http.DefaultClient.Do(req)                               //nolint:gosec // taint flows from the nolinted line above
+	resp, err := ccHTTPClient.Do(req)                                     //nolint:gosec // taint flows from the nolinted line above
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("oidc discovery: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("oidc discovery: status %d", resp.StatusCode)
+	}
 	var meta struct {
 		TokenEndpoint string `json:"token_endpoint"`
 	}
@@ -35,7 +42,7 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	// Keycloak confidential clients default to client_secret_basic: send the
 	// client credentials via HTTP Basic auth (client_secret_post 401s).
 	treq.SetBasicAuth(clientID, clientSecret)
-	tresp, err := http.DefaultClient.Do(treq) //nolint:gosec // token endpoint URL is from issuer discovery, operator-injected
+	tresp, err := ccHTTPClient.Do(treq) //nolint:gosec // token endpoint URL is from issuer discovery, operator-injected
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("token request: %w", err)
 	}
@@ -92,6 +99,15 @@ func ResetTokenCache() {
 	ccMu.Lock()
 	ccTok, ccExp = "", time.Time{}
 	ccMu.Unlock()
+}
+
+// ClientCredsConfigured reports whether the three env vars required for the
+// client_credentials grant are all non-empty. This is the single authoritative
+// definition; status.go calls this instead of re-encoding the var names.
+func ClientCredsConfigured() bool {
+	return os.Getenv("OIDC_ISSUER") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
+		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
 }
 
 // loadStoredAccessToken reads the default token path and returns the access token

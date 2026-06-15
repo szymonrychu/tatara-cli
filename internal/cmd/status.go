@@ -79,16 +79,13 @@ func newStatusCmd() *cobra.Command {
 // network call. Mirrors the human phrasing in the task spec.
 func expiryDesc(exp time.Time) string {
 	d := time.Until(exp).Round(time.Second)
-	if d > 0 {
+	if d >= 0 {
 		return "valid for " + d.String()
 	}
 	return "expired " + (-d).String() + " ago"
 }
 
-// clientCredsConfigured reports whether the three client_credentials env vars
-// are all set, mirroring the check auth.AccessToken uses.
+// clientCredsConfigured delegates to auth so the env-var contract lives in one place.
 func clientCredsConfigured() bool {
-	return os.Getenv("OIDC_ISSUER") != "" &&
-		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
-		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
+	return auth.ClientCredsConfigured()
 }

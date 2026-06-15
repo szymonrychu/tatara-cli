@@ -119,6 +119,29 @@ func TestStatus_EnvOverridesURLs(t *testing.T) {
 	require.Contains(t, out, "Chat:     https://chat.env")
 }
 
+// Finding 6: a token expiring exactly now (d==0) should read "valid for 0s", not "expired 0s ago".
+func TestStatus_ExpiryAtExactlyNow(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	// Write a token whose ExpiresAt is right now; time.Until rounds to 0s.
+	saveToken(t, dir, time.Now())
+	authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
+	require.Contains(t, authLine, "valid for", "token expiring exactly now should not show as expired")
+	require.NotContains(t, authLine, "expired")
+}
+
+// Finding 3: status clientCredsConfigured delegates to auth so env-var contract lives once.
+// We exercise this indirectly: set the three env vars, confirm status reports client-credentials.
+func TestStatus_ClientCredsConfiguredDelegates(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("OIDC_ISSUER", "https://issuer.example")
+	t.Setenv("CLI_OIDC_CLIENT_ID", "id")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "secret")
+	authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
+	require.Contains(t, authLine, "client-credentials configured")
+}
+
 func saveToken(t *testing.T, dir string, exp time.Time) {
 	t.Helper()
 	tokenPath := filepath.Join(dir, "tatara", "token.json")

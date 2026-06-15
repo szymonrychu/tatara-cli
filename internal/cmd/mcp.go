@@ -65,9 +65,19 @@ func newMCPCmd() *cobra.Command {
 
 			token, tokenPath := resolveMCPToken(ctx, logger)
 
+			// copyToken returns an independent copy so each Client owns its own
+			// token struct; concurrent refresh in one Client never races with another.
+			copyToken := func(t *auth.Token) *auth.Token {
+				if t == nil {
+					return nil
+				}
+				cp := *t
+				return &cp
+			}
+
 			cliCfg := client.Config{
 				BaseURL:   base,
-				Token:     token,
+				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
 			if tokenPath != "" {
@@ -86,7 +96,7 @@ func newMCPCmd() *cobra.Command {
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			opCfg := client.Config{
 				BaseURL:   opBase,
-				Token:     token,
+				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
 			if tokenPath != "" {
@@ -105,7 +115,7 @@ func newMCPCmd() *cobra.Command {
 			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
 			chatCfg := client.Config{
 				BaseURL:   chatBase,
-				Token:     token,
+				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
 			if tokenPath != "" {

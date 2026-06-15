@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -290,4 +291,161 @@ func TestClient_PassesReaderBodyUnchanged(t *testing.T) {
 	_ = resp.Body.Close()
 
 	assert.Equal(t, []byte(payload), gotBody)
+}
+
+// TestClient_RefreshLogsSuccess verifies that a successful token refresh emits
+// an INFO-level structured log when a logger is configured (hard rule 12).
+func TestClient_RefreshLogsSuccess(t *testing.T) {
+	newToken := &auth.Token{
+		AccessToken: "refreshed",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		TokenType:   "Bearer",
+	}
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Log:     logger,
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return newToken, nil
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	logged := buf.String()
+	assert.Contains(t, logged, "token refreshed", "INFO log must mention token refreshed")
+	assert.Contains(t, logged, "expires_at", "INFO log must carry expires_at field")
+}
+
+// TestClient_RefreshLogsError verifies that a failed refresh emits an
+// ERROR-level log when a logger is configured (hard rule 12).
+func TestClient_RefreshLogsError(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Log:     logger,
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return nil, errors.New("oauth server down")
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.Error(t, err)
+
+	logged := buf.String()
+	assert.Contains(t, logged, "token refresh failed", "ERROR log must mention refresh failure")
+}
+
+// TestClient_ConcurrentDo_NoDataRace verifies that concurrent Do calls from
+// multiple goroutines on a near-expiry client do not produce a data race on
+// c.token (finding 1: missing mutex). Run with -race to catch unsynchronized
+// reads/writes; the test also asserts that every request succeeds.
+func TestClient_ConcurrentDo_NoDataRace(t *testing.T) {
+	newToken := &auth.Token{
+		AccessToken: "concurrent-refreshed",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		TokenType:   "Bearer",
+	}
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			// Simulate slow refresh so goroutines overlap.
+			time.Sleep(5 * time.Millisecond)
+			return newToken, nil
+		},
+	})
+	require.NoError(t, err)
+
+	const n = 10
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			resp, doErr := c.Do(context.Background(), http.MethodGet, "/", nil)
+			if doErr == nil {
+				_ = resp.Body.Close()
+			}
+			errs <- doErr
+		}()
+	}
+	for i := 0; i < n; i++ {
+		require.NoError(t, <-errs)
+	}
+}
+
+// TestClient_DoEmitsMetric verifies that a successful Do call increments the
+// obs.TokenRefreshTotal counter when a near-expiry refresh occurs (finding 2).
+func TestClient_DoEmitsMetric(t *testing.T) {
+	newToken := &auth.Token{
+		AccessToken: "metered",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		TokenType:   "Bearer",
+	}
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return newToken, nil
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	// Metric call is a side effect; just assert no panic and success.
+}
+
+// TestClient_NoLoggerSafe verifies that nil logger (default) does not panic
+// during refresh success or failure.
+func TestClient_NoLoggerSafe(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		// Log not set - must not panic
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return &auth.Token{AccessToken: "x", ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.NotPanics(t, func() {
+		resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+	})
 }

@@ -72,6 +72,9 @@ func (d *DeviceFlow) Poll(ctx context.Context, code *DeviceCode) (*Token, error)
 	}
 	deadline := time.Now().Add(time.Duration(code.ExpiresIn) * time.Second)
 	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("auth: device code expired")
+		}
 		tok, err := d.exchange(ctx, code.DeviceCode)
 		if err == nil {
 			return tok, nil
@@ -85,9 +88,6 @@ func (d *DeviceFlow) Poll(ctx context.Context, code *DeviceCode) (*Token, error)
 			}
 		default:
 			return nil, err
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("auth: device code expired")
 		}
 		select {
 		case <-ctx.Done():
