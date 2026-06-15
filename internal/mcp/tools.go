@@ -516,6 +516,22 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
 			}),
+		op("decline_implementation", "Declare that you will NOT implement this issue. Call this when, after investigation, you have determined the issue should not or need not be implemented. Posts the reason as a comment on the issue and parks the task. A silent finish with no PR and no decline_implementation call is NOT allowed.",
+			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"Why you are NOT implementing this issue (what you considered, why it should not be done / is already done / is wrong). Posted to the issue."}},"required":["reason"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "reason") == "" {
+					return "", "", nil, fmt.Errorf("reason required")
+				}
+				body := map[string]any{
+					"action": "declined",
+					"reason": a["reason"],
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/implement-outcome", body, nil
+			}),
 		op("comment", "Post a free-form comment on the current task's linked issue (answer maintainer questions, post design notes). The operator posts it under the bot identity on the next reconcile and does NOT change the issue's lifecycle state. Use this to keep a discovery conversation alive; use issue_outcome to set the outcome.",
 			`{"type":"object","properties":{"task":{"type":"string"},"body":{"type":"string"}},"required":["body"]}`,
 			func(a map[string]any) (string, string, any, error) {
