@@ -1324,6 +1324,39 @@ func TestInvoke_ErrorBodyCapped(t *testing.T) {
 	assert.Less(t, len(err.Error()), 5000, "error string must not contain unbounded backend body")
 }
 
+// Regression: the body cap must apply ONLY to error responses. A successful
+// response larger than errBodyCap (graph queries, memory lists routinely are)
+// must be returned in full and remain valid JSON, not truncated to 4096 bytes.
+func TestInvoke_SuccessBodyNotTruncated(t *testing.T) {
+	// Build a valid JSON payload well over the 4096-byte error cap.
+	items := make([]map[string]string, 0, 400)
+	for i := 0; i < 400; i++ {
+		items = append(items, map[string]string{"id": fmt.Sprintf("entity-%04d", i)})
+	}
+	payload, err := json.Marshal(map[string]any{"results": items})
+	require.NoError(t, err)
+	require.Greater(t, len(payload), 4096, "test payload must exceed errBodyCap to be meaningful")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, "create_memory")
+	buf, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err)
+	require.Equal(t, payload, buf, "successful body must be returned in full, not truncated")
+
+	// And it must still parse as valid JSON (truncation would break this).
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(buf, &out), "full success body must be valid JSON")
+	results, ok := out["results"].([]any)
+	require.True(t, ok)
+	require.Len(t, results, 400, "all items must survive (no truncation)")
+}
+
 // Finding #5: Operator tool schemas must NOT list task/project in required when env fallback exists.
 func TestOperatorTools_EnvFallbackFieldsNotInSchemaRequired(t *testing.T) {
 	envFallbackTools := []struct {

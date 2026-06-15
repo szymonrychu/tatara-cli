@@ -725,19 +725,31 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// Cap body read to prevent unbounded memory use on large error responses.
-	lr := io.LimitReader(resp.Body, 4096)
-	buf, err := io.ReadAll(lr)
+	if resp.StatusCode >= 400 {
+		// For auth failures, return a generic message to avoid leaking token
+		// details or internal proxy headers the backend may echo. Drain (capped)
+		// so the connection can be reused.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errBodyCap))
+			return nil, fmt.Errorf("tatara: %s %s -> %d: authentication/authorization failed", method, path, resp.StatusCode)
+		}
+		// Cap the error body to keep error strings (and memory) bounded.
+		ebuf, err := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
+		if err != nil {
+			return nil, fmt.Errorf("tatara: %s %s -> %d: read body: %w", method, path, resp.StatusCode, err)
+		}
+		return nil, fmt.Errorf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(ebuf)))
+	}
+	// Success: read the full body. Tool results (graph queries, memory lists) are
+	// routinely larger than the error cap and must not be truncated.
+	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("tatara: %s %s: read body: %w", method, path, err)
 	}
-	if resp.StatusCode >= 400 {
-		// For auth failures, return a generic message to avoid leaking token
-		// details or internal proxy headers the backend may echo.
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("tatara: %s %s -> %d: authentication/authorization failed", method, path, resp.StatusCode)
-		}
-		return nil, fmt.Errorf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(buf)))
-	}
 	return buf, nil
 }
+
+// errBodyCap bounds how many bytes of an error response body we read into an
+// error message, preventing a hostile or broken backend from forcing unbounded
+// memory use or multi-megabyte error strings.
+const errBodyCap = 4096
