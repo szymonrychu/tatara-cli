@@ -9,9 +9,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // RefreshFunc is called when the current token is about to expire.
@@ -19,6 +21,7 @@ type RefreshFunc func(ctx context.Context, t *auth.Token) (*auth.Token, error)
 
 // Client is an HTTP client that attaches bearer tokens and auto-refreshes on near-expiry.
 type Client struct {
+	mu        sync.Mutex
 	base      string
 	http      *http.Client
 	token     *auth.Token
@@ -65,9 +68,19 @@ func New(cfg Config) (*Client, error) {
 // Do sends an HTTP request to base+path. body may be nil, []byte, io.Reader, or any
 // JSON-serializable value. Attaches Authorization header and refreshes token if needed.
 func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.Response, error) {
-	if err := c.ensureFresh(ctx); err != nil {
+	start := time.Now()
+
+	c.mu.Lock()
+	if err := c.ensureFreshLocked(ctx); err != nil {
+		c.mu.Unlock()
 		return nil, err
 	}
+	var bearer string
+	if c.token != nil {
+		bearer = c.token.AccessToken
+	}
+	c.mu.Unlock()
+
 	var bodyReader io.Reader
 	if body != nil {
 		switch b := body.(type) {
@@ -91,13 +104,33 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.R
 	if bodyReader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.token != nil {
-		req.Header.Set("Authorization", "Bearer "+c.token.AccessToken)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	return c.http.Do(req)
+	resp, err := c.http.Do(req)
+	durMs := float64(time.Since(start).Milliseconds())
+	if c.log != nil {
+		c.log.Info("client.Do",
+			"method", method,
+			"path", path,
+			"status_code", statusCode(resp),
+			"duration_ms", durMs,
+			"error", err,
+		)
+	}
+	return resp, err
 }
 
-func (c *Client) ensureFresh(ctx context.Context) error {
+// statusCode returns the HTTP status code from resp, or 0 when resp is nil.
+func statusCode(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+// ensureFreshLocked checks and refreshes the token when needed. Caller must hold c.mu.
+func (c *Client) ensureFreshLocked(ctx context.Context) error {
 	if c.token == nil {
 		return auth.ErrNoToken
 	}
@@ -125,11 +158,13 @@ func (c *Client) ensureFresh(ctx context.Context) error {
 	}
 	nt, err := c.refresh(ctx, c.token)
 	if err != nil {
+		obs.TokenRefreshTotal.WithLabelValues("error").Inc()
 		if c.log != nil {
 			c.log.Error("token refresh failed", "err", err)
 		}
 		return fmt.Errorf("client: refresh: %w", err)
 	}
+	obs.TokenRefreshTotal.WithLabelValues("ok").Inc()
 	if c.log != nil {
 		c.log.Info("token refreshed", "expires_at", nt.ExpiresAt)
 	}
