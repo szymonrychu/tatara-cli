@@ -42,8 +42,6 @@ buildctl --addr "$BUILDKITD_ADDR" build \
   --opt build-arg:COMMIT="${SHORT_SHA}" \
   --opt build-arg:DATE="${BUILD_DATE}" \
   --secret id=GIT_AUTH_TOKEN,env=GITHUB_TOKEN \
-  --import-cache type=registry,ref="${DEST}:buildcache" \
-  --export-cache type=registry,ref="${DEST}:buildcache,mode=max" \
   --output "type=image,\"name=${DEST}:${SHORT_SHA},${DEST}:${VERSION}\",push=true"
 
 echo "buildkit: pushed ${DEST}:${SHORT_SHA} and ${DEST}:${VERSION}"
