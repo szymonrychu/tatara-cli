@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 	"github.com/szymonrychu/tatara-cli/internal/version"
 )
 
@@ -69,12 +71,18 @@ func buildTool(t Tool) mcplib.Tool {
 func (s *Server) register(t Tool) {
 	tool := buildTool(t)
 	s.srv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+		start := time.Now()
 		args := req.GetArguments()
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
+		elapsedMs := float64(time.Since(start).Milliseconds())
+		obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
 		if err != nil {
-			s.log.Error("tool error", "tool", t.Name, "err", err)
+			obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
+			s.log.Error("tool error", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "err", err)
 			return mcplib.NewToolResultError(err.Error()), nil
 		}
+		obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
+		s.log.Info("tool call", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "status", "ok")
 		var out any
 		if json.Unmarshal(body, &out) == nil {
 			pretty, _ := json.MarshalIndent(out, "", "  ")

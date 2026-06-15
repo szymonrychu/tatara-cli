@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ type Client struct {
 	refresh   RefreshFunc
 	reload    func() (*auth.Token, error)
 	save      func(*auth.Token) error
+	log       *slog.Logger
 }
 
 // Config holds constructor parameters for Client.
@@ -36,6 +38,7 @@ type Config struct {
 	Reload    func() (*auth.Token, error) // re-read token from disk after acquiring lock
 	Save      func(*auth.Token) error
 	HTTP      *http.Client
+	Log       *slog.Logger // optional; refresh outcomes logged at INFO/ERROR when set
 }
 
 // New creates a Client from cfg. BaseURL is required.
@@ -55,6 +58,7 @@ func New(cfg Config) (*Client, error) {
 		refresh:   cfg.Refresh,
 		reload:    cfg.Reload,
 		save:      cfg.Save,
+		log:       cfg.Log,
 	}, nil
 }
 
@@ -121,7 +125,13 @@ func (c *Client) ensureFresh(ctx context.Context) error {
 	}
 	nt, err := c.refresh(ctx, c.token)
 	if err != nil {
+		if c.log != nil {
+			c.log.Error("token refresh failed", "err", err)
+		}
 		return fmt.Errorf("client: refresh: %w", err)
+	}
+	if c.log != nil {
+		c.log.Info("token refreshed", "expires_at", nt.ExpiresAt)
 	}
 	c.token = nt
 	if c.save != nil {

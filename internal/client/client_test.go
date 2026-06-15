@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -290,4 +291,91 @@ func TestClient_PassesReaderBodyUnchanged(t *testing.T) {
 	_ = resp.Body.Close()
 
 	assert.Equal(t, []byte(payload), gotBody)
+}
+
+// TestClient_RefreshLogsSuccess verifies that a successful token refresh emits
+// an INFO-level structured log when a logger is configured (hard rule 12).
+func TestClient_RefreshLogsSuccess(t *testing.T) {
+	newToken := &auth.Token{
+		AccessToken: "refreshed",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		TokenType:   "Bearer",
+	}
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Log:     logger,
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return newToken, nil
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	logged := buf.String()
+	assert.Contains(t, logged, "token refreshed", "INFO log must mention token refreshed")
+	assert.Contains(t, logged, "expires_at", "INFO log must carry expires_at field")
+}
+
+// TestClient_RefreshLogsError verifies that a failed refresh emits an
+// ERROR-level log when a logger is configured (hard rule 12).
+func TestClient_RefreshLogsError(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Log:     logger,
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return nil, errors.New("oauth server down")
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.Error(t, err)
+
+	logged := buf.String()
+	assert.Contains(t, logged, "token refresh failed", "ERROR log must mention refresh failure")
+}
+
+// TestClient_NoLoggerSafe verifies that nil logger (default) does not panic
+// during refresh success or failure.
+func TestClient_NoLoggerSafe(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		// Log not set - must not panic
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return &auth.Token{AccessToken: "x", ExpiresAt: time.Now().Add(time.Hour)}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.NotPanics(t, func() {
+		resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+	})
 }
