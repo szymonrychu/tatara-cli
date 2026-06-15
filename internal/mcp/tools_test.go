@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -521,15 +522,9 @@ func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
 	}{
 		{
 			"code_path",
-			map[string]any{"from": "a", "to": "b", "relations": "calls,imports", "max_depth": float64(5)},
+			map[string]any{"repo": "myrepo", "from": "a", "to": "b", "relations": "calls,imports", "max_depth": float64(5)},
 			"/code-graph/path",
-			map[string]string{"from": "a", "to": "b", "relations": "calls,imports", "max_depth": "5"},
-		},
-		{
-			"code_path",
-			map[string]any{"from": "a", "to": "b"},
-			"/code-graph/path",
-			map[string]string{"from": "a", "to": "b"},
+			map[string]string{"repo": "myrepo", "from": "a", "to": "b", "relations": "calls,imports", "max_depth": "5"},
 		},
 		{
 			"code_path",
@@ -544,22 +539,10 @@ func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
 			map[string]string{"repo": "r", "limit": "20"},
 		},
 		{
-			"code_important",
-			map[string]any{},
-			"/code-graph/important",
-			map[string]string{},
-		},
-		{
 			"code_stats",
 			map[string]any{"repo": "r"},
 			"/code-graph/stats",
 			map[string]string{"repo": "r"},
-		},
-		{
-			"code_stats",
-			map[string]any{},
-			"/code-graph/stats",
-			map[string]string{},
 		},
 		{
 			"code_ambiguous_edges",
@@ -572,12 +555,6 @@ func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
 			map[string]any{"id": "go:func:m.F", "repo": "r"},
 			"/code-graph/explain",
 			map[string]string{"id": "go:func:m.F", "repo": "r"},
-		},
-		{
-			"code_explain",
-			map[string]any{"id": "go:func:m.F"},
-			"/code-graph/explain",
-			map[string]string{"id": "go:func:m.F"},
 		},
 	}
 	for i, c := range cases {
@@ -607,8 +584,26 @@ func TestNewCodeGraphTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // to required
 	_, _, _, err = toolByName(t, "code_path").Build(map[string]any{"to": "b"})
 	require.Error(t, err) // from required
+	_, _, _, err = toolByName(t, "code_path").Build(map[string]any{"from": "a", "to": "b"})
+	require.Error(t, err) // repo required (finding #3: server always requires repo)
 	_, _, _, err = toolByName(t, "code_explain").Build(map[string]any{})
 	require.Error(t, err) // id required
+	_, _, _, err = toolByName(t, "code_explain").Build(map[string]any{"id": "x"})
+	require.Error(t, err) // repo required (finding #4: server always requires repo)
+	_, _, _, err = toolByName(t, "code_important").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_stats").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_ambiguous_edges").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_related").Build(map[string]any{"id": "x"})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_hyperedges").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_communities").Build(map[string]any{})
+	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_bridges").Build(map[string]any{})
+	require.Error(t, err) // repo required
 }
 
 func TestConfidenceParams_ForwardedAsQueryParams(t *testing.T) {
@@ -652,9 +647,9 @@ func TestCodeRelated_BuildQuery(t *testing.T) {
 			map[string]string{"id": "go:func:m.F", "relations": "conceptually_related_to,cites", "min_confidence": "0.5", "repo": "r"},
 		},
 		{
-			"id only",
-			map[string]any{"id": "go:func:m.F"},
-			map[string]string{"id": "go:func:m.F"},
+			"id and repo only",
+			map[string]any{"id": "go:func:m.F", "repo": "r"},
+			map[string]string{"id": "go:func:m.F", "repo": "r"},
 		},
 	}
 	for _, c := range cases {
@@ -682,6 +677,8 @@ func TestCodeRelated_BuildQuery(t *testing.T) {
 func TestCodeRelated_RequireID(t *testing.T) {
 	_, _, _, err := toolByName(t, "code_related").Build(map[string]any{"repo": "r"})
 	require.Error(t, err) // id required
+	_, _, _, err = toolByName(t, "code_related").Build(map[string]any{"id": "go:func:m.F"})
+	require.Error(t, err) // repo required (finding #4)
 }
 
 func TestCodeHyperedges_BuildQuery(t *testing.T) {
@@ -691,7 +688,7 @@ func TestCodeHyperedges_BuildQuery(t *testing.T) {
 		q    map[string]string
 	}{
 		{"entity and repo", map[string]any{"entity": "go:func:m.F", "repo": "r"}, map[string]string{"entity": "go:func:m.F", "repo": "r"}},
-		{"no args", map[string]any{}, map[string]string{}},
+		{"repo only", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
 	}
 	for _, c := range cases {
 		c := c
@@ -744,7 +741,6 @@ func TestCodeCommunities_BuildQuery(t *testing.T) {
 		q    map[string]string
 	}{
 		{"repo", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
-		{"no args", map[string]any{}, map[string]string{}},
 	}
 	for _, c := range cases {
 		c := c
@@ -799,7 +795,7 @@ func TestCodeBridges_BuildQuery(t *testing.T) {
 		q    map[string]string
 	}{
 		{"repo and limit", map[string]any{"repo": "r", "limit": float64(5)}, map[string]string{"repo": "r", "limit": "5"}},
-		{"no args", map[string]any{}, map[string]string{}},
+		{"repo only", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
 	}
 	for _, c := range cases {
 		c := c
@@ -830,7 +826,7 @@ func TestCodeImportant_ByParam(t *testing.T) {
 		q    map[string]string
 	}{
 		{"by betweenness", map[string]any{"repo": "r", "by": "betweenness", "limit": float64(10)}, map[string]string{"repo": "r", "by": "betweenness", "limit": "10"}},
-		{"by degree", map[string]any{"by": "degree"}, map[string]string{"by": "degree"}},
+		{"by degree", map[string]any{"repo": "r", "by": "degree"}, map[string]string{"repo": "r", "by": "degree"}},
 		{"no by", map[string]any{"repo": "r"}, map[string]string{"repo": "r"}},
 	}
 	for _, c := range cases {
@@ -875,7 +871,7 @@ func TestOperatorTools_SCMBuildPaths(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"propose_issue", map[string]any{"project": "alpha", "repositoryRef": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "bug"}, http.MethodPost, "/projects/alpha/issues"},
+		{"propose_issue", map[string]any{"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "bug"}, http.MethodPost, "/projects/alpha/issues"},
 		{"propose_issue", map[string]any{"project": "alpha", "repo": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "improvement"}, http.MethodPost, "/projects/alpha/issues"},
 		{"review_verdict", map[string]any{"task": "t1", "decision": "approve"}, http.MethodPost, "/tasks/t1/review"},
 		{"pr_outcome", map[string]any{"task": "t1", "action": "merge"}, http.MethodPost, "/tasks/t1/pr-outcome"},
@@ -1255,4 +1251,122 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
 	require.Len(t, OperatorTools(), 18)
+}
+
+// Finding #1: Invoke must return error when body read fails (not silently truncate).
+func TestInvoke_BodyReadErrorSurfaced(t *testing.T) {
+	// Server writes a partial response and then abruptly closes without flushing.
+	// Use a custom listener that closes the connection mid-body.
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Signal response started but hijack before body is complete.
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("ResponseWriter does not implement Hijacker")
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		// Write a valid 200 header with Content-Length > actual body to force truncation.
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{")
+		_ = buf.Flush()
+		_ = conn.Close()
+		close(done)
+	}))
+	defer srv.Close()
+
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, "create_memory")
+	_, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	<-done
+	// The error may come from the HTTP transport (unexpected EOF) wrapping the
+	// body read; either way it must not be nil.
+	require.Error(t, err, "truncated body read must surface as error")
+}
+
+// Finding #7: 401/403 responses must return a generic auth error, not the raw body.
+func TestInvoke_AuthErrorGeneric(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		status := status
+		t.Run(fmt.Sprintf("status_%d", status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"Bearer eyJhbGciOiJSUzI1NiJ9.secret.token"}`))
+			}))
+			defer srv.Close()
+			c := freshClient(t, srv.URL)
+			tool := toolByName(t, "create_memory")
+			_, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+			require.Error(t, err)
+			// Must not contain the raw body (which could include a token).
+			assert.NotContains(t, err.Error(), "secret.token", "auth error must not echo raw backend body")
+			assert.Contains(t, err.Error(), "authentication/authorization failed")
+		})
+	}
+}
+
+// Finding #7: Body must be capped (not unlimited) on large error responses.
+func TestInvoke_ErrorBodyCapped(t *testing.T) {
+	large := strings.Repeat("x", 8192)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(large))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, "create_memory")
+	_, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.Error(t, err)
+	// The error string must not contain the full 8 KB body.
+	assert.Less(t, len(err.Error()), 5000, "error string must not contain unbounded backend body")
+}
+
+// Finding #5: Operator tool schemas must NOT list task/project in required when env fallback exists.
+func TestOperatorTools_EnvFallbackFieldsNotInSchemaRequired(t *testing.T) {
+	envFallbackTools := []struct {
+		name      string
+		fieldName string
+	}{
+		{"task_get", "task"},
+		{"task_update", "task"},
+		{"subtask_list", "task"},
+		{"subtask_create", "task"},
+		{"project_get", "project"},
+		{"repo_list", "project"},
+		{"task_list", "project"},
+	}
+	for _, tc := range envFallbackTools {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tl := operatorToolByName(t, tc.name)
+			var schema map[string]any
+			require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+			req, _ := schema["required"].([]any)
+			for _, r := range req {
+				assert.NotEqual(t, tc.fieldName, r,
+					"tool %s: %q must not be in schema required (it has env fallback via %s)",
+					tc.name, tc.fieldName, strings.ToUpper("TATARA_"+tc.fieldName))
+			}
+		})
+	}
+}
+
+// Finding #6: propose_issue must NOT advertise repositoryRef; only repo is valid.
+func TestProposeIssue_NoRepositoryRefInSchema(t *testing.T) {
+	tl := operatorToolByName(t, "propose_issue")
+	assert.NotContains(t, string(tl.Schema), "repositoryRef",
+		"propose_issue schema must not expose repositoryRef; use only repo")
+}
+
+// Finding #6: propose_issue must reject repositoryRef-only arg (no repo fallback).
+func TestProposeIssue_RepositoryRefArgIgnored(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "p")
+	_, _, _, err := operatorToolByName(t, "propose_issue").Build(map[string]any{
+		"repositoryRef": "szymonrychu/tatara", "title": "t", "body": "b", "kind": "bug",
+	})
+	// repositoryRef is no longer a valid input; without repo the build must fail.
+	require.Error(t, err, "propose_issue must fail when only repositoryRef is provided (schema no longer advertises it)")
 }

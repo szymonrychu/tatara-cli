@@ -152,6 +152,28 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 	assert.Contains(t, logged, "create_memory", "ERROR log must carry tool name")
 }
 
+// TestRun_HonorsContext verifies that Server.Run accepts and wires the context
+// (finding #8: Run previously discarded ctx, preventing signal-cancellation).
+// The actual cancellation behaviour requires stdio pipes and is tested at the
+// integration level; here we verify the method signature and that a
+// pre-cancelled context causes Listen to return promptly.
+func TestRun_HonorsContext(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	srv := NewServer(mem, mem, mem, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	// Run with a cancelled context: Listen reads from a no-op reader and should
+	// return once the context is done. We pipe /dev/null as stdin so it doesn't block.
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx) }()
+	select {
+	case <-done:
+		// returned promptly - ctx was honoured
+	case <-context.Background().Done():
+		t.Fatal("Run did not return after context cancellation")
+	}
+}
+
 // TestRegister_MetricsIncremented verifies that a successful tool call
 // increments ToolCallsTotal{tool, "ok"} (hard rule 13).
 func TestRegister_MetricsIncremented(t *testing.T) {

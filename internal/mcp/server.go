@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -92,7 +93,8 @@ func (s *Server) register(t Tool) {
 	})
 }
 
-// Run starts the stdio MCP server. It blocks until stdin closes.
-func (s *Server) Run(_ context.Context) error {
-	return server.ServeStdio(s.srv)
+// Run starts the stdio MCP server. It blocks until stdin closes or ctx is cancelled.
+func (s *Server) Run(ctx context.Context) error {
+	stdio := server.NewStdioServer(s.srv)
+	return stdio.Listen(ctx, os.Stdin, os.Stdout)
 }

@@ -199,38 +199,38 @@ func AllTools() []Tool {
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"id":{"type":"string"}},"required":["repo","id"]}`),
 			Build:  codeGet("/code/cross-repo", []string{"repo", "id"}, nil)},
 		{Name: "code_path", Description: "Shortest path between two code entities in the code graph.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"relations":{"type":"string"},"max_depth":{"type":"integer"}},"required":["from","to"]}`),
-			Build:  codeGet("/code-graph/path", []string{"from", "to"}, []string{"repo", "relations", "max_depth"})},
-		{Name: "code_important", Description: "Most important entities in the code graph, ranked by 'by' (degree default, or betweenness from persisted analytics), optionally filtered by repo.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"},"by":{"type":"string","enum":["degree","betweenness"]}}}`),
-			Build:  codeGet("/code-graph/important", nil, []string{"repo", "limit", "by"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"relations":{"type":"string"},"max_depth":{"type":"integer"}},"required":["repo","from","to"]}`),
+			Build:  codeGet("/code-graph/path", []string{"repo", "from", "to"}, []string{"relations", "max_depth"})},
+		{Name: "code_important", Description: "Most important entities in the code graph, ranked by 'by' (degree default, or betweenness from persisted analytics), scoped to repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"},"by":{"type":"string","enum":["degree","betweenness"]}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/important", []string{"repo"}, []string{"limit", "by"})},
 		{Name: "code_stats", Description: "Graph statistics: entity/edge counts, types, tiers, isolated entities, import cycles.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
-			Build:  codeGet("/code-graph/stats", nil, []string{"repo"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/stats", []string{"repo"}, nil)},
 		{Name: "code_ambiguous_edges", Description: "Edges with low confidence score or AMBIGUOUS tier, ordered by score ascending.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
-			Build:  codeGet("/code-graph/ambiguous", nil, []string{"repo", "limit"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/ambiguous", []string{"repo"}, []string{"limit"})},
 		{Name: "code_explain", Description: "Full context for a code entity: detail, in/out neighbors with file locations.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
-			Build:  codeGet("/code-graph/explain", []string{"id"}, []string{"repo"})},
-		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), optionally filtered by relation and min confidence.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id"]}`),
-			Build:  codeGet("/code-graph/related", []string{"id"}, []string{"relations", "min_confidence", "repo"})},
-		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity and/or repo.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}}}`),
-			Build:  codeGet("/code-graph/hyperedges", nil, []string{"entity", "repo"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id","repo"]}`),
+			Build:  codeGet("/code-graph/explain", []string{"id", "repo"}, nil)},
+		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), filtered by relation and min confidence.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id","repo"]}`),
+			Build:  codeGet("/code-graph/related", []string{"id", "repo"}, []string{"relations", "min_confidence"})},
+		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/hyperedges", []string{"repo"}, []string{"entity"})},
 		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
 			Build:  codeGet("/code-graph/hyperedge", []string{"id"}, []string{"repo"})},
-		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), optionally filtered by repo.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}}}`),
-			Build:  codeGet("/code-graph/communities", nil, []string{"repo"})},
+		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), scoped to repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/communities", []string{"repo"}, nil)},
 		{Name: "code_community", Description: "List the member entities of a specific community.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer"}},"required":["repo","community"]}`),
 			Build:  codeGet("/code-graph/community", []string{"repo", "community"}, nil)},
-		{Name: "code_bridges", Description: "High-betweenness entities that connect more than one community (graph bridges), ranked, optionally filtered by repo and limited.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}}}`),
-			Build:  codeGet("/code-graph/bridges", nil, []string{"repo", "limit"})},
+		{Name: "code_bridges", Description: "High-betweenness entities that connect more than one community (graph bridges), ranked, scoped to repo.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}},"required":["repo"]}`),
+			Build:  codeGet("/code-graph/bridges", []string{"repo"}, []string{"limit"})},
 	}
 }
 
@@ -292,8 +292,8 @@ func OperatorTools() []Tool {
 			func(a map[string]any) (string, string, any, error) {
 				return http.MethodGet, "/projects", nil, nil
 			}),
-		op("project_get", "Get a Project by name.",
-			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+		op("project_get", "Get a Project by name. Defaults to TATARA_PROJECT env when project is omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
@@ -301,8 +301,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodGet, "/projects/" + url.PathEscape(p), nil, nil
 			}),
-		op("repo_list", "List Repositories in a Project.",
-			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+		op("repo_list", "List Repositories in a Project. Defaults to TATARA_PROJECT env when project is omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
@@ -310,8 +310,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodGet, "/projects/" + url.PathEscape(p) + "/repositories", nil, nil
 			}),
-		op("task_list", "List Tasks in a Project.",
-			`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}`,
+		op("task_list", "List Tasks in a Project. Defaults to TATARA_PROJECT env when project is omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
@@ -319,8 +319,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodGet, "/projects/" + url.PathEscape(p) + "/tasks", nil, nil
 			}),
-		op("task_get", "Get a Task by name.",
-			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
+		op("task_get", "Get a Task by name. Defaults to TATARA_TASK env when task is omitted.",
+			`{"type":"object","properties":{"task":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -328,8 +328,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodGet, "/tasks/" + url.PathEscape(tk), nil, nil
 			}),
-		op("task_update", "Record agent status notes on a Task (resultSummary, note).",
-			`{"type":"object","properties":{"task":{"type":"string"},"resultSummary":{"type":"string"},"note":{"type":"string"}},"required":["task"]}`,
+		op("task_update", "Record agent status notes on a Task (resultSummary, note). Defaults to TATARA_TASK env when task is omitted.",
+			`{"type":"object","properties":{"task":{"type":"string"},"resultSummary":{"type":"string"},"note":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -344,8 +344,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPatch, "/tasks/" + url.PathEscape(tk), body, nil
 			}),
-		op("subtask_list", "List Subtasks of a Task (sorted by order).",
-			`{"type":"object","properties":{"task":{"type":"string"}},"required":["task"]}`,
+		op("subtask_list", "List Subtasks of a Task (sorted by order). Defaults to TATARA_TASK env when task is omitted.",
+			`{"type":"object","properties":{"task":{"type":"string"}}}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -353,8 +353,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodGet, "/tasks/" + url.PathEscape(tk) + "/subtasks", nil, nil
 			}),
-		op("subtask_create", "Create a Subtask under a Task (agent self-planning).",
-			`{"type":"object","properties":{"task":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"},"order":{"type":"integer"}},"required":["task","title"]}`,
+		op("subtask_create", "Create a Subtask under a Task (agent self-planning). Defaults to TATARA_TASK env when task is omitted.",
+			`{"type":"object","properties":{"task":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"},"order":{"type":"integer"}},"required":["title"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -375,6 +375,8 @@ func OperatorTools() []Tool {
 		op("subtask_update", "Update a Subtask status (phase, result, turnId).",
 			`{"type":"object","properties":{"subtask":{"type":"string"},"phase":{"type":"string"},"result":{"type":"string"},"turnId":{"type":"string"}},"required":["subtask"]}`,
 			func(a map[string]any) (string, string, any, error) {
+				// No TATARA_SUBTASK env exists; subtask IDs are ephemeral and not
+				// injected by the wrapper Pod, so argString (no env fallback) is correct.
 				st := argString(a, "subtask")
 				if st == "" {
 					return "", "", nil, fmt.Errorf("subtask required")
@@ -387,17 +389,14 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPatch, "/subtasks/" + url.PathEscape(st), body, nil
 			}),
-		op("propose_issue", "Propose a new SCM issue (bug or improvement). The operator opens it under the bot identity as an idea-labelled discovery issue; it stays in discussion until a human approves. Embed <!-- tatara-authored --> in the body to keep it in discovery.",
-			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"repositoryRef":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]}},"required":["title","body","kind","repo"]}`,
+		op("propose_issue", "Propose a new SCM issue (bug or improvement). The operator opens it under the bot identity as an idea-labelled discovery issue; it stays in discussion until a human approves. Embed <!-- tatara-authored --> in the body to keep it in discovery. project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]}},"required":["title","body","kind","repo"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
 					return "", "", nil, fmt.Errorf("project required")
 				}
-				repo := argString(a, "repositoryRef")
-				if repo == "" {
-					repo = argString(a, "repo")
-				}
+				repo := argString(a, "repo")
 				if repo == "" {
 					return "", "", nil, fmt.Errorf("repo required")
 				}
@@ -726,8 +725,18 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	buf, _ := io.ReadAll(resp.Body)
+	// Cap body read to prevent unbounded memory use on large error responses.
+	lr := io.LimitReader(resp.Body, 4096)
+	buf, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, fmt.Errorf("tatara: %s %s: read body: %w", method, path, err)
+	}
 	if resp.StatusCode >= 400 {
+		// For auth failures, return a generic message to avoid leaking token
+		// details or internal proxy headers the backend may echo.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("tatara: %s %s -> %d: authentication/authorization failed", method, path, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(buf)))
 	}
 	return buf, nil
