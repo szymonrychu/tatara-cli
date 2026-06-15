@@ -55,7 +55,7 @@ func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
 	tools := OperatorTools()
-	require.Len(t, tools, 17)
+	require.Len(t, tools, 18)
 	for _, tl := range tools {
 		var v any
 		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "operator tool %q has invalid JSON schema", tl.Name)

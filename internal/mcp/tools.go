@@ -545,6 +545,29 @@ func OperatorTools() []Tool {
 				body := map[string]any{"body": a["body"]}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/comment", body, nil
 			}),
+		op("comment_on_issue", "Post a comment on an EXISTING open issue (identified by repo + number) when your idea duplicates, extends, or is a sub-aspect of it - instead of opening a duplicate issue. The operator posts it under the bot identity. Use propose_issue ONLY for genuinely novel, standalone problems.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"number":{"type":"integer"},"body":{"type":"string"}},"required":["repo","number","body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				if argString(a, "repo") == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				if _, ok := a["number"]; !ok {
+					return "", "", nil, fmt.Errorf("number required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{
+					"repo":   a["repo"],
+					"number": a["number"],
+					"body":   a["body"],
+				}
+				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/issue-comment", body, nil
+			}),
 	}
 }
 
