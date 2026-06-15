@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,4 +57,23 @@ func TestRefreshToken(t *testing.T) {
 	require.Equal(t, newAccess, tok.AccessToken)
 	require.Equal(t, newRefresh, tok.RefreshToken)
 	require.WithinDuration(t, time.Now().Add(300*time.Second), tok.ExpiresAt, 5*time.Second)
+}
+
+func TestRefreshTokenInvalidGrantReturnsErrRefreshExpired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Token is not active"}`))
+	}))
+	defer srv.Close()
+
+	old := &auth.Token{
+		AccessToken:  "old-at",
+		RefreshToken: "old-rt",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+		TokenType:    "Bearer",
+	}
+	_, err := auth.RefreshToken(context.Background(), srv.URL, "my-client", old, srv.Client())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, auth.ErrRefreshExpired), "expected ErrRefreshExpired, got: %v", err)
 }

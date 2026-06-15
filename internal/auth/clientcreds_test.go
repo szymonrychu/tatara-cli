@@ -65,3 +65,39 @@ func TestTokenNoEnvStillErrNoToken(t *testing.T) {
 	_, err := auth.AccessToken(context.Background())
 	require.ErrorIs(t, err, auth.ErrNoToken)
 }
+
+// Finding 2: non-200 discovery response must surface status, not "no token_endpoint".
+func TestClientCredentialsTokenDiscoveryNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html>Bad Gateway</html>"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	_, _, err := auth.ClientCredentialsToken(context.Background(), srv.URL, "cid", "secret")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "502", "error should mention the HTTP status")
+}
+
+// Finding 3: ClientCredentialsToken must respect context cancellation (proves it does not
+// use http.DefaultClient with no timeout: a hung server + cancelled ctx must return promptly).
+func TestClientCredentialsTokenRespectsContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hang forever to simulate a blocked issuer.
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, _, err := auth.ClientCredentialsToken(ctx, srv.URL, "cid", "secret")
+	require.Error(t, err)
+	require.Less(t, time.Since(start), 5*time.Second, "should cancel quickly, not hang")
+}

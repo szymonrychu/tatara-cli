@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,11 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrRefreshExpired is returned when the server rejects the refresh token with
+// invalid_grant (expired or revoked). Callers should stop retrying and prompt
+// the user to run `tatara login` again.
+var ErrRefreshExpired = errors.New("auth: refresh token expired (run `tatara login`)")
 
 func RefreshToken(ctx context.Context, issuer, clientID string, t *Token, client *http.Client) (*Token, error) {
 	if client == nil {
@@ -32,6 +38,13 @@ func RefreshToken(ctx context.Context, issuer, clientID string, t *Token, client
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
+		var oauthErr struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &oauthErr)
+		if oauthErr.Error == "invalid_grant" {
+			return nil, ErrRefreshExpired
+		}
 		return nil, fmt.Errorf("auth: refresh %d: %s", resp.StatusCode, string(raw))
 	}
 	var tr struct {
