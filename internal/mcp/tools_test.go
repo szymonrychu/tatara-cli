@@ -113,7 +113,41 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 16)
+	require.Len(t, OperatorTools(), 17)
+}
+
+func TestDeclineImplementation_Build(t *testing.T) {
+	t.Run("explicit task + reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		m, p, body, err := operatorToolByName(t, "decline_implementation").Build(map[string]any{
+			"task":   "t1",
+			"reason": "already implemented in #42",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t1/implement-outcome", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "declined", bm["action"])
+		require.Equal(t, "already implemented in #42", bm["reason"])
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "decline_implementation").Build(map[string]any{
+			"reason": "out of scope",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/implement-outcome", p)
+	})
+	t.Run("require reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "decline_implementation").Build(map[string]any{})
+		require.Error(t, err)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "decline_implementation").Build(map[string]any{"reason": "no"})
+		require.Error(t, err)
+	})
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
