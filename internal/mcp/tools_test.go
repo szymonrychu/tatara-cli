@@ -113,7 +113,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 17)
+	require.Len(t, OperatorTools(), 18)
 }
 
 func TestDeclineImplementation_Build(t *testing.T) {
@@ -1189,4 +1189,70 @@ func TestCommentToolRequiresBody(t *testing.T) {
 	if _, _, _, err := tool.Build(map[string]any{}); err == nil {
 		t.Fatal("expected error when body missing")
 	}
+}
+
+func TestCommentOnIssueTool_Registered(t *testing.T) {
+	var found bool
+	for _, tl := range OperatorTools() {
+		if tl.Name == "comment_on_issue" {
+			found = true
+		}
+	}
+	require.True(t, found, "comment_on_issue must be registered in OperatorTools")
+}
+
+func TestCommentOnIssueTool_BuildPath(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "")
+	m, p, body, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"project": "myproj",
+		"repo":    "szymonrychu/tatara",
+		"number":  float64(42),
+		"body":    "this duplicates #7",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, m)
+	require.Equal(t, "/projects/myproj/issue-comment", p)
+	bm := body.(map[string]any)
+	require.Equal(t, "szymonrychu/tatara", bm["repo"])
+	require.Equal(t, float64(42), bm["number"])
+	require.Equal(t, "this duplicates #7", bm["body"])
+}
+
+func TestCommentOnIssueTool_EnvFallback(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "proj-from-env")
+	_, p, _, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"repo":   "szymonrychu/tatara",
+		"number": float64(1),
+		"body":   "comment",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "/projects/proj-from-env/issue-comment", p)
+}
+
+func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "")
+	// missing project
+	_, _, _, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"repo": "r", "number": float64(1), "body": "b",
+	})
+	require.Error(t, err)
+	// missing repo
+	_, _, _, err = operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"project": "p", "number": float64(1), "body": "b",
+	})
+	require.Error(t, err)
+	// missing number
+	_, _, _, err = operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"project": "p", "repo": "r", "body": "b",
+	})
+	require.Error(t, err)
+	// missing body
+	_, _, _, err = operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"project": "p", "repo": "r", "number": float64(1),
+	})
+	require.Error(t, err)
+}
+
+func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
+	require.Len(t, OperatorTools(), 18)
 }
