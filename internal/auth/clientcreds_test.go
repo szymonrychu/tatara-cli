@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,6 +149,96 @@ func TestClientCredsMintTotal_IncrementedOnError(t *testing.T) {
 	require.Error(t, err)
 	after := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("error"))
 	assert.Equal(t, before+1, after, "ClientCredsMintTotal{error} must increment on error")
+}
+
+// Finding 2 (audit-r3): An expired stored token must fall through to client_credentials,
+// not be returned as-is. We write a token file whose ExpiresAt is 2 minutes in the past,
+// configure cc env vars pointing at a real fake issuer, and assert we get a fresh cc token.
+func TestAccessTokenWithExpiry_ExpiredStoredTokenFallsBackToCC(t *testing.T) {
+	srv := newFakeIssuer(t)
+	defer srv.Close()
+
+	// Write an expired token.json to a temp XDG_CONFIG_HOME.
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("OIDC_ISSUER", srv.URL)
+	t.Setenv("CLI_OIDC_CLIENT_ID", "cid")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "secret")
+	auth.ResetTokenCache()
+
+	// Persist an expired token so LoadToken succeeds but the token is stale.
+	expiredTok := auth.Token{
+		AccessToken: "expired-tok",
+		ExpiresAt:   time.Now().Add(-2 * time.Minute),
+	}
+	path, err := auth.DefaultTokenPath()
+	require.NoError(t, err)
+	require.NoError(t, auth.SaveToken(path, &expiredTok))
+
+	tok, _, err := auth.AccessTokenWithExpiry(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tok-123", tok, "expired stored token must NOT be returned; cc mint must be used instead")
+}
+
+// Finding 1 (audit-r3): AccessTokenWithExpiry must not hold ccMu across the HTTP round-trip.
+// We verify this by counting concurrent in-flight discovery calls: if the lock is held
+// during the network call the second goroutine can't enter at all, so maxConcurrent stays 1.
+// With the lock released during the network call both goroutines overlap and maxConcurrent==2.
+func TestAccessTokenWithExpiry_ConcurrentCallsDoNotSerialize(t *testing.T) {
+	const callDelay = 60 * time.Millisecond
+	var (
+		inFlight    atomic.Int32
+		maxInFlight atomic.Int32
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		cur := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		// Update maxInFlight if this is a new peak.
+		for {
+			old := maxInFlight.Load()
+			if cur <= old || maxInFlight.CompareAndSwap(old, cur) {
+				break
+			}
+		}
+		time.Sleep(callDelay)
+		_, _ = fmt.Fprintf(w, `{"token_endpoint":"http://%s/token"}`, r.Host)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"cc-tok","expires_in":300,"token_type":"Bearer"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("OIDC_ISSUER", srv.URL)
+	t.Setenv("CLI_OIDC_CLIENT_ID", "cid")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "secret")
+	auth.ResetTokenCache()
+
+	errCh := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, _, err := auth.AccessTokenWithExpiry(context.Background())
+			errCh <- err
+		}()
+	}
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+	require.Equal(t, int32(2), maxInFlight.Load(),
+		"both goroutines must overlap in the HTTP call (ccMu must not be held during network call)")
+}
+
+// Finding 3 (audit-r3): ClientCredentialsToken must return a clean error (not panic)
+// when the issuer URL is malformed (contains a control character, making
+// http.NewRequestWithContext return a non-nil error).
+func TestClientCredentialsToken_MalformedIssuerReturnsError(t *testing.T) {
+	// A URL with a control char (\x01) is rejected by http.NewRequestWithContext.
+	malformed := "http://127.0.0.1/\x01bad"
+	_, _, err := auth.ClientCredentialsToken(context.Background(), malformed, "cid", "secret")
+	require.Error(t, err, "malformed issuer URL must return error, not panic")
 }
 
 // Finding: ClientCredentialsToken must respect context cancellation (proves it does not

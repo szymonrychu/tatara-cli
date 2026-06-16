@@ -23,8 +23,12 @@ var ccHTTPClient = &http.Client{Timeout: 30 * time.Second}
 // issuer's discovered token endpoint and returns the access token + expiry.
 func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret string) (string, time.Time, error) {
 	disco := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, disco, nil) //nolint:gosec // issuer URL is operator-injected env
-	resp, err := ccHTTPClient.Do(req)                                     //nolint:gosec // taint flows from the nolinted line above
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, disco, nil) //nolint:gosec // issuer URL is operator-injected env
+	if err != nil {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
+		return "", time.Time{}, fmt.Errorf("oidc discovery request: %w", err)
+	}
+	resp, err := ccHTTPClient.Do(req) //nolint:gosec // taint flows from the nolinted line above
 	if err != nil {
 		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("oidc discovery: %w", err)
@@ -42,7 +46,11 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 		return "", time.Time{}, errors.New("oidc discovery: no token_endpoint")
 	}
 	form := url.Values{"grant_type": {"client_credentials"}}
-	treq, _ := http.NewRequestWithContext(ctx, http.MethodPost, meta.TokenEndpoint, strings.NewReader(form.Encode()))
+	treq, err := http.NewRequestWithContext(ctx, http.MethodPost, meta.TokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
+		return "", time.Time{}, fmt.Errorf("token request build: %w", err)
+	}
 	treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	// Keycloak confidential clients default to client_secret_basic: send the
 	// client credentials via HTTP Basic auth (client_secret_post 401s).
@@ -94,9 +102,12 @@ func AccessToken(ctx context.Context) (string, error) {
 // response field. For stored (device-flow) tokens the expiry is whatever was
 // saved in the token file.
 func AccessTokenWithExpiry(ctx context.Context) (string, time.Time, error) {
+	// Only use the stored token if it is still fresh (>30s remaining). An expired
+	// stored token must fall through to the client_credentials grant so that an
+	// agent pod with a stale token.json on its config volume does not return a 401.
 	path, err := DefaultTokenPath()
 	if err == nil {
-		if t, lerr := LoadToken(path); lerr == nil && t.AccessToken != "" {
+		if t, lerr := LoadToken(path); lerr == nil && t.AccessToken != "" && time.Until(t.ExpiresAt) > 30*time.Second {
 			return t.AccessToken, t.ExpiresAt, nil
 		}
 	}
@@ -106,16 +117,31 @@ func AccessTokenWithExpiry(ctx context.Context) (string, time.Time, error) {
 	if issuer == "" || id == "" || secret == "" {
 		return "", time.Time{}, ErrNoToken
 	}
+	// Check the in-memory cache under the lock. If the cached token is still fresh
+	// return it immediately without making a network call.
 	ccMu.Lock()
-	defer ccMu.Unlock()
 	if ccTok != "" && time.Now().Before(ccExp.Add(-30*time.Second)) {
-		return ccTok, ccExp, nil
+		tok, exp := ccTok, ccExp
+		ccMu.Unlock()
+		return tok, exp, nil
 	}
+	ccMu.Unlock()
+	// Mint a new token WITHOUT holding ccMu. ClientCredentialsToken makes two HTTP
+	// round-trips (discovery + token) each up to 30s. Holding the lock across those
+	// calls would serialize every goroutine needing a token behind one slow OIDC call.
 	tok, exp, err := ClientCredentialsToken(ctx, issuer, id, secret)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	ccTok, ccExp = tok, exp
+	// Store the fresh token under the lock, but only if it is still newer than what
+	// another concurrent goroutine may have already written (last-write-wins is fine
+	// since tokens from the same issuer are interchangeable; we just avoid clobbering
+	// a newer entry with an older one in a race).
+	ccMu.Lock()
+	if exp.After(ccExp) {
+		ccTok, ccExp = tok, exp
+	}
+	ccMu.Unlock()
 	return tok, exp, nil
 }
 

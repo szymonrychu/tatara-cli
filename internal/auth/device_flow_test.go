@@ -247,6 +247,28 @@ func TestDeviceFlowStartNon200ParsesErrorField(t *testing.T) {
 	require.NotContains(t, err.Error(), `"error_description"`, "should not echo raw JSON body")
 }
 
+// Finding 4 (audit-r3): DeviceFlow.exchange must return a clean error (not panic) when
+// the Issuer URL is malformed, consistent with Start in the same type.
+func TestDeviceFlowExchange_MalformedIssuerReturnsError(t *testing.T) {
+	df := &auth.DeviceFlow{
+		HTTP:         &http.Client{Timeout: time.Second},
+		Issuer:       "http://127.0.0.1/\x01bad",
+		ClientID:     "cid",
+		Scope:        "openid",
+		TickOverride: time.Millisecond,
+	}
+	// Construct a fake DeviceCode so Poll can call exchange.
+	dc := &auth.DeviceCode{
+		DeviceCode: "dc-bad",
+		ExpiresIn:  60,
+		Interval:   0,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := df.Poll(ctx, dc)
+	require.Error(t, err, "malformed issuer URL must return error from exchange, not panic")
+}
+
 func TestDeviceFlowContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
