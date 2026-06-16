@@ -67,6 +67,12 @@ func New(cfg Config) (*Client, error) {
 
 // Do sends an HTTP request to base+path. body may be nil, []byte, io.Reader, or any
 // JSON-serializable value. Attaches Authorization header and refreshes token if needed.
+//
+// No-retry contract: Do does not retry on 401 or any other status. Token refresh
+// (ensureFreshLocked) runs before the request is built, so the request is sent exactly
+// once. Callers that pass an io.Reader body must not assume the body can be replayed; if
+// a retry loop is ever added here, io.Reader bodies must be buffered into []byte first
+// (or callers required to pass []byte) before that loop is introduced.
 func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	start := time.Now()
 
