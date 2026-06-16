@@ -53,7 +53,17 @@ func (d *DeviceFlow) Start(ctx context.Context) (*DeviceCode, error) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("auth: device start %d: %s", resp.StatusCode, string(b))
+		var e struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if jsonErr := json.Unmarshal(b, &e); jsonErr == nil && e.Error != "" {
+			if e.ErrorDescription != "" {
+				return nil, fmt.Errorf("auth: device start %d: %s: %s", resp.StatusCode, e.Error, e.ErrorDescription)
+			}
+			return nil, fmt.Errorf("auth: device start %d: %s", resp.StatusCode, e.Error)
+		}
+		return nil, fmt.Errorf("auth: device start %d", resp.StatusCode)
 	}
 	var dc DeviceCode
 	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
@@ -85,6 +95,9 @@ func (d *DeviceFlow) Poll(ctx context.Context, code *DeviceCode) (*Token, error)
 		case errors.Is(err, ErrSlowDown):
 			if d.TickOverride == 0 {
 				interval += 5 * time.Second
+				if interval > 30*time.Second {
+					interval = 30 * time.Second
+				}
 			}
 		default:
 			return nil, err

@@ -57,6 +57,9 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	if err := json.NewDecoder(tresp.Body).Decode(&tr); err != nil {
 		return "", time.Time{}, fmt.Errorf("token decode: %w", err)
 	}
+	if tr.AccessToken == "" {
+		return "", time.Time{}, errors.New("token response: empty access_token")
+	}
 	return tr.AccessToken, time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second), nil
 }
 

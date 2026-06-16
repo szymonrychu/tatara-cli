@@ -225,6 +225,28 @@ func TestDeviceFlowExpiredCodeYieldsExpiredError(t *testing.T) {
 	require.Equal(t, int32(0), exchanges.Load(), "no exchange should happen when deadline already passed")
 }
 
+// Finding 4: Device Start non-200 should surface parsed error fields, not the raw body.
+func TestDeviceFlowStartNon200ParsesErrorField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/protocol/openid-connect/auth/device" {
+			respondJSON(w, http.StatusBadRequest, map[string]any{
+				"error":             "unauthorized_client",
+				"error_description": "Client is not allowed to use device flow",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	df := newDeviceFlow(t, srv)
+	_, err := df.Start(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unauthorized_client", "should include parsed error field")
+	// Must NOT contain a JSON blob dump of the entire body.
+	require.NotContains(t, err.Error(), `"error_description"`, "should not echo raw JSON body")
+}
+
 func TestDeviceFlowContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

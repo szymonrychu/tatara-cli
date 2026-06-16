@@ -105,6 +105,25 @@ func TestClientCredsConfigured(t *testing.T) {
 	})
 }
 
+// Finding 1: ClientCredentialsToken must reject a 200 response with empty access_token.
+func TestClientCredentialsTokenEmptyAccessToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"token_endpoint":"http://%s/token"}`, r.Host)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Returns 200 but omits access_token (empty string in JSON).
+		_, _ = fmt.Fprint(w, `{"expires_in":300,"token_type":"Bearer"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	_, _, err := auth.ClientCredentialsToken(context.Background(), srv.URL, "cid", "secret")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty access_token")
+}
+
 // Finding: ClientCredentialsToken must respect context cancellation (proves it does not
 // use http.DefaultClient with no timeout: a hung server + cancelled ctx must return promptly).
 func TestClientCredentialsTokenRespectsContext(t *testing.T) {
