@@ -75,26 +75,8 @@ var (
 // it in memory, refreshing when within 30s of expiry. Returns ErrNoToken when
 // neither path is available.
 func AccessToken(ctx context.Context) (string, error) {
-	if tok, err := loadStoredAccessToken(); err == nil && tok != "" {
-		return tok, nil
-	}
-	issuer := os.Getenv("OIDC_ISSUER")
-	id := os.Getenv("CLI_OIDC_CLIENT_ID")
-	secret := os.Getenv("CLI_OIDC_CLIENT_SECRET")
-	if issuer == "" || id == "" || secret == "" {
-		return "", ErrNoToken
-	}
-	ccMu.Lock()
-	defer ccMu.Unlock()
-	if ccTok != "" && time.Now().Before(ccExp.Add(-30*time.Second)) {
-		return ccTok, nil
-	}
-	tok, exp, err := ClientCredentialsToken(ctx, issuer, id, secret)
-	if err != nil {
-		return "", err
-	}
-	ccTok, ccExp = tok, exp
-	return tok, nil
+	tok, _, err := AccessTokenWithExpiry(ctx)
+	return tok, err
 }
 
 // AccessTokenWithExpiry is like AccessToken but also returns the token expiry.
@@ -141,18 +123,4 @@ func ClientCredsConfigured() bool {
 	return os.Getenv("OIDC_ISSUER") != "" &&
 		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
 		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
-}
-
-// loadStoredAccessToken reads the default token path and returns the access token
-// string, or an empty string if none is stored.
-func loadStoredAccessToken() (string, error) {
-	path, err := DefaultTokenPath()
-	if err != nil {
-		return "", err
-	}
-	t, err := LoadToken(path)
-	if err != nil {
-		return "", err
-	}
-	return t.AccessToken, nil
 }
