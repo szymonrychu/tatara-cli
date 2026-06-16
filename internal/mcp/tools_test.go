@@ -1187,6 +1187,60 @@ func TestCommentToolRequiresBody(t *testing.T) {
 	}
 }
 
+// Finding 1+2: code_hyperedge must require repo (server handler calls reqRepo first).
+func TestCodeHyperedge_RequireRepo(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"id": "he:r:f:l"})
+	require.Error(t, err, "code_hyperedge must return error when repo is omitted")
+	require.Contains(t, err.Error(), "repo required")
+}
+
+func TestCodeHyperedge_SchemaRepoRequired(t *testing.T) {
+	tl := toolByName(t, "code_hyperedge")
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+	req, _ := schema["required"].([]any)
+	var hasID, hasRepo bool
+	for _, r := range req {
+		if r == "id" {
+			hasID = true
+		}
+		if r == "repo" {
+			hasRepo = true
+		}
+	}
+	require.True(t, hasID, "code_hyperedge schema required must contain id")
+	require.True(t, hasRepo, "code_hyperedge schema required must contain repo")
+}
+
+// Finding 3: patch_entity must validate that patch is present before building the request.
+func TestPatchEntity_RequiresPatch(t *testing.T) {
+	_, _, _, err := toolByName(t, "patch_entity").Build(map[string]any{"id": "ent-1"})
+	require.Error(t, err, "patch_entity must return error when patch is omitted")
+	require.Contains(t, err.Error(), "patch required")
+}
+
+func TestPatchEntity_NilPatchRejected(t *testing.T) {
+	_, _, _, err := toolByName(t, "patch_entity").Build(map[string]any{"id": "ent-1", "patch": nil})
+	require.Error(t, err, "patch_entity must reject nil patch value")
+}
+
+// Finding 5: passthrough tools must set additionalProperties:false so unknown keys are
+// rejected before they are forwarded to backends that use DisallowUnknownFields.
+func TestPassthroughTools_AdditionalPropertiesFalse(t *testing.T) {
+	passthroughTools := []string{"create_memory", "query", "describe", "bulk_create_memories", "create_edge"}
+	for _, name := range passthroughTools {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			tl := toolByName(t, name)
+			var schema map[string]any
+			require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+			v, ok := schema["additionalProperties"]
+			require.True(t, ok, "tool %s schema must have additionalProperties", name)
+			require.Equal(t, false, v, "tool %s schema must have additionalProperties:false", name)
+		})
+	}
+}
+
 func TestCommentOnIssueTool_Registered(t *testing.T) {
 	var found bool
 	for _, tl := range OperatorTools() {

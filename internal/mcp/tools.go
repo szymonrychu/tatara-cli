@@ -38,7 +38,7 @@ func AllTools() []Tool {
 		{
 			Name:        "create_memory",
 			Description: "Insert a new text memory. Returns the track_id.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object","additionalProperties":{"type":"string"}}},"required":["text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object","additionalProperties":{"type":"string"}}},"required":["text"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/memories", a, nil
 			},
@@ -70,7 +70,7 @@ func AllTools() []Tool {
 		{
 			Name:        "bulk_create_memories",
 			Description: "Submit a batch of memories for async ingest.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object"}},"required":["text"]}}},"required":["items"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object"}},"required":["text"]}}},"required":["items"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/memories:bulk", a, nil
 			},
@@ -90,7 +90,7 @@ func AllTools() []Tool {
 		{
 			Name:        "query",
 			Description: "Retrieve memory references for the given query.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/queries", a, nil
 			},
@@ -98,7 +98,7 @@ func AllTools() []Tool {
 		{
 			Name:        "describe",
 			Description: "Generative answer plus source paths for the given query.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["local","global","hybrid","naive"]},"text":{"type":"string"},"top_k":{"type":"integer"}},"required":["mode","text"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/queries:describe", a, nil
 			},
@@ -137,7 +137,11 @@ func AllTools() []Tool {
 				if id == "" {
 					return "", "", nil, fmt.Errorf("id required")
 				}
-				return http.MethodPatch, "/entities/" + url.PathEscape(id), a["patch"], nil
+				patch, ok := a["patch"]
+				if !ok || patch == nil {
+					return "", "", nil, fmt.Errorf("patch required")
+				}
+				return http.MethodPatch, "/entities/" + url.PathEscape(id), patch, nil
 			},
 		},
 		{
@@ -151,7 +155,7 @@ func AllTools() []Tool {
 		{
 			Name:        "create_edge",
 			Description: "Create a new edge between two existing entities.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"from_entity":{"type":"string"},"to_entity":{"type":"string"},"relation":{"type":"string"},"properties":{"type":"object"}},"required":["from_entity","to_entity","relation"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"from_entity":{"type":"string"},"to_entity":{"type":"string"},"relation":{"type":"string"},"properties":{"type":"object"}},"required":["from_entity","to_entity","relation"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/edges", a, nil
 			},
@@ -220,8 +224,8 @@ func AllTools() []Tool {
 			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}},"required":["repo"]}`),
 			Build:  codeGet("/code-graph/hyperedges", []string{"repo"}, []string{"entity"})},
 		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id"]}`),
-			Build:  codeGet("/code-graph/hyperedge", []string{"id"}, []string{"repo"})},
+			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id","repo"]}`),
+			Build:  codeGet("/code-graph/hyperedge", []string{"id", "repo"}, nil)},
 		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), scoped to repo.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}},"required":["repo"]}`),
 			Build:  codeGet("/code-graph/communities", []string{"repo"}, nil)},
