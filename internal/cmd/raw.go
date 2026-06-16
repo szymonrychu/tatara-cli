@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -56,11 +57,11 @@ func newRawCmd() *cobra.Command {
 			}
 			token, err := auth.LoadToken(tokenPath)
 			if err != nil {
-				tokStr, ccErr := auth.AccessToken(ctx)
+				tokStr, exp, ccErr := auth.AccessTokenWithExpiry(ctx)
 				if ccErr != nil {
 					return ccErr
 				}
-				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
+				token = &auth.Token{AccessToken: tokStr, ExpiresAt: exp, TokenType: "Bearer"}
 				tokenPath = ""
 			}
 
@@ -87,10 +88,14 @@ func newRawCmd() *cobra.Command {
 				body = strings.NewReader(dataFlag)
 			}
 
+			verbose, _ := cmd.Flags().GetCount("verbose")
+			rawLogger := slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: verboseLevel(verbose)}))
+
 			cfg := client.Config{
 				BaseURL:   base,
 				Token:     token,
 				TokenPath: tokenPath,
+				Log:       rawLogger,
 			}
 			if tokenPath != "" {
 				cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }

@@ -77,12 +77,14 @@ func newStatusCmd() *cobra.Command {
 
 // expiryDesc describes how long until or since a token expires, without a
 // network call. Mirrors the human phrasing in the task spec.
+// Sign is checked before rounding so a token expired by <500ms is reported as
+// "expired 0s ago" rather than "valid for 0s".
 func expiryDesc(exp time.Time) string {
-	d := time.Until(exp).Round(time.Second)
-	if d >= 0 {
-		return "valid for " + d.String()
+	raw := time.Until(exp)
+	if raw >= 0 {
+		return "valid for " + raw.Round(time.Second).String()
 	}
-	return "expired " + (-d).String() + " ago"
+	return "expired " + (-raw).Round(time.Second).String() + " ago"
 }
 
 // clientCredsConfigured delegates to auth so the env-var contract lives in one place.

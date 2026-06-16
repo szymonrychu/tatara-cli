@@ -59,6 +59,37 @@ func TestRefreshToken(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(300*time.Second), tok.ExpiresAt, 5*time.Second)
 }
 
+// Finding 2a: RefreshToken must reject a 200 response with empty access_token.
+func TestRefreshTokenEmptyAccessToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Returns 200 but omits access_token.
+		_, _ = w.Write([]byte(`{"refresh_token":"new-rt","expires_in":300,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	old := &auth.Token{AccessToken: "old-at", RefreshToken: "old-rt", ExpiresAt: time.Now().Add(-time.Minute)}
+	_, err := auth.RefreshToken(context.Background(), srv.URL, "my-client", old, srv.Client())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "access_token")
+}
+
+// Finding 2b: RefreshToken must preserve old refresh token when response omits one.
+func TestRefreshTokenPreservesOldRefreshTokenWhenOmitted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Returns new access_token but NO refresh_token (IdP chose not to rotate).
+		_, _ = w.Write([]byte(`{"access_token":"new-at","expires_in":300,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	old := &auth.Token{AccessToken: "old-at", RefreshToken: "keep-rt", ExpiresAt: time.Now().Add(-time.Minute)}
+	tok, err := auth.RefreshToken(context.Background(), srv.URL, "my-client", old, srv.Client())
+	require.NoError(t, err)
+	require.Equal(t, "new-at", tok.AccessToken)
+	require.Equal(t, "keep-rt", tok.RefreshToken, "old refresh token must be preserved when response omits one")
+}
+
 func TestRefreshTokenInvalidGrantReturnsErrRefreshExpired(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

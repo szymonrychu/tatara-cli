@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
@@ -20,21 +22,34 @@ import (
 // actual backend calls do. With no stored token and no client-credentials it
 // returns a nil token so the server still starts and advertises its tools;
 // individual tool invocations then fail until credentials exist.
-func resolveMCPToken(ctx context.Context, logger *slog.Logger) (*auth.Token, string) {
+//
+// For the client-credentials case the token expiry is set so that
+// ensureFreshLocked can compute meaningful freshness, and a cc-refresh func is
+// returned via the second return value so callers can wire it into the client
+// Config - without this the long-lived MCP server would get 401s after the
+// (commonly ~5 min) cc token expires.
+func resolveMCPToken(ctx context.Context, logger *slog.Logger) (*auth.Token, string, func(context.Context, *auth.Token) (*auth.Token, error)) {
 	tokenPath, err := auth.DefaultTokenPath()
 	if err != nil {
 		logger.Warn("mcp: cannot resolve token path; starting unauthenticated", "reason", err.Error())
-		return nil, ""
+		return nil, "", nil
 	}
 	if token, lerr := auth.LoadToken(tokenPath); lerr == nil {
-		return token, tokenPath
+		return token, tokenPath, nil
 	}
-	tokStr, ccErr := auth.AccessToken(ctx)
+	tokStr, exp, ccErr := auth.AccessTokenWithExpiry(ctx)
 	if ccErr != nil {
 		logger.Warn("mcp: no credentials; starting unauthenticated, tool calls fail until `tatara login` or OIDC env is set", "reason", ccErr.Error())
-		return nil, ""
+		return nil, "", nil
 	}
-	return &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}, ""
+	ccRefresh := func(ctx context.Context, _ *auth.Token) (*auth.Token, error) {
+		s, e, err := auth.AccessTokenWithExpiry(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &auth.Token{AccessToken: s, ExpiresAt: e, TokenType: "Bearer"}, nil
+	}
+	return &auth.Token{AccessToken: tokStr, ExpiresAt: exp, TokenType: "Bearer"}, "", ccRefresh
 }
 
 func newMCPCmd() *cobra.Command {
@@ -63,7 +78,7 @@ func newMCPCmd() *cobra.Command {
 			project, _ := cmd.Flags().GetString("project")
 			base = client.MemoryURLForProject(base, project)
 
-			token, tokenPath := resolveMCPToken(ctx, logger)
+			token, tokenPath, ccRefresh := resolveMCPToken(ctx, logger)
 
 			// copyToken returns an independent copy so each Client owns its own
 			// token struct; concurrent refresh in one Client never races with another.
@@ -75,18 +90,24 @@ func newMCPCmd() *cobra.Command {
 				return &cp
 			}
 
+			wireCreds := func(cfg *client.Config) {
+				if tokenPath != "" {
+					cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+					cfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
+						return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
+					}
+					cfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+				} else if ccRefresh != nil {
+					cfg.Refresh = ccRefresh
+				}
+			}
+
 			cliCfg := client.Config{
 				BaseURL:   base,
 				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
-			if tokenPath != "" {
-				cliCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				cliCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				cliCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
+			wireCreds(&cliCfg)
 			cli, err := client.New(cliCfg)
 			if err != nil {
 				return err
@@ -99,13 +120,7 @@ func newMCPCmd() *cobra.Command {
 				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
-			if tokenPath != "" {
-				opCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				opCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				opCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
+			wireCreds(&opCfg)
 			opCli, err := client.New(opCfg)
 			if err != nil {
 				return err
@@ -118,24 +133,34 @@ func newMCPCmd() *cobra.Command {
 				Token:     copyToken(token),
 				TokenPath: tokenPath,
 			}
-			if tokenPath != "" {
-				chatCfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
-				chatCfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
-					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
-				}
-				chatCfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-			}
+			wireCreds(&chatCfg)
 			chatCli, err := client.New(chatCfg)
 			if err != nil {
 				return err
 			}
 
 			srv := mcp.NewServer(cli, opCli, chatCli, logger)
+
+			metricsAddr, _ := cmd.Flags().GetString("metrics-addr")
+			if metricsAddr != "" {
+				mux := http.NewServeMux()
+				mux.Handle("/metrics", promhttp.Handler())
+				metricsSrv := &http.Server{Addr: metricsAddr, Handler: mux} //nolint:gosec // user-supplied addr
+				go func() {
+					if serr := metricsSrv.ListenAndServe(); serr != nil && serr != http.ErrServerClosed {
+						logger.Error("metrics server error", "err", serr)
+					}
+				}()
+				defer func() { _ = metricsSrv.Shutdown(context.Background()) }()
+				logger.Info("metrics server started", "addr", metricsAddr)
+			}
+
 			return srv.Run(ctx)
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
 	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
+	c.Flags().String("metrics-addr", os.Getenv("TATARA_MCP_METRICS_ADDR"), "TCP address for the /metrics HTTP endpoint (e.g. 127.0.0.1:9090); empty disables it")
 	return c
 }
 

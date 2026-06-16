@@ -84,6 +84,9 @@ func (s *Server) register(t Tool) {
 		}
 		obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
 		s.log.Info("tool call", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "status", "ok")
+		if len(body) == 0 {
+			return mcplib.NewToolResultText(`{"ok":true}`), nil
+		}
 		var out any
 		if json.Unmarshal(body, &out) == nil {
 			pretty, _ := json.MarshalIndent(out, "", "  ")

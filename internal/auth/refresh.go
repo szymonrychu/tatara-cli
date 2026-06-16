@@ -57,6 +57,12 @@ func RefreshToken(ctx context.Context, issuer, clientID string, t *Token, client
 	if err := json.Unmarshal(raw, &tr); err != nil {
 		return nil, fmt.Errorf("auth: parse refresh response: %w", err)
 	}
+	if tr.AccessToken == "" {
+		return nil, fmt.Errorf("auth: refresh response missing access_token")
+	}
+	if tr.RefreshToken == "" {
+		tr.RefreshToken = t.RefreshToken
+	}
 	return &Token{
 		AccessToken:  tr.AccessToken,
 		RefreshToken: tr.RefreshToken,

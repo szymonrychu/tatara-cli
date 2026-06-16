@@ -57,6 +57,9 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	if err := json.NewDecoder(tresp.Body).Decode(&tr); err != nil {
 		return "", time.Time{}, fmt.Errorf("token decode: %w", err)
 	}
+	if tr.AccessToken == "" {
+		return "", time.Time{}, errors.New("token response: empty access_token")
+	}
 	return tr.AccessToken, time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second), nil
 }
 
@@ -72,26 +75,38 @@ var (
 // it in memory, refreshing when within 30s of expiry. Returns ErrNoToken when
 // neither path is available.
 func AccessToken(ctx context.Context) (string, error) {
-	if tok, err := loadStoredAccessToken(); err == nil && tok != "" {
-		return tok, nil
+	tok, _, err := AccessTokenWithExpiry(ctx)
+	return tok, err
+}
+
+// AccessTokenWithExpiry is like AccessToken but also returns the token expiry.
+// For client_credentials tokens the expiry is sourced from the OIDC expires_in
+// response field. For stored (device-flow) tokens the expiry is whatever was
+// saved in the token file.
+func AccessTokenWithExpiry(ctx context.Context) (string, time.Time, error) {
+	path, err := DefaultTokenPath()
+	if err == nil {
+		if t, lerr := LoadToken(path); lerr == nil && t.AccessToken != "" {
+			return t.AccessToken, t.ExpiresAt, nil
+		}
 	}
 	issuer := os.Getenv("OIDC_ISSUER")
 	id := os.Getenv("CLI_OIDC_CLIENT_ID")
 	secret := os.Getenv("CLI_OIDC_CLIENT_SECRET")
 	if issuer == "" || id == "" || secret == "" {
-		return "", ErrNoToken
+		return "", time.Time{}, ErrNoToken
 	}
 	ccMu.Lock()
 	defer ccMu.Unlock()
 	if ccTok != "" && time.Now().Before(ccExp.Add(-30*time.Second)) {
-		return ccTok, nil
+		return ccTok, ccExp, nil
 	}
 	tok, exp, err := ClientCredentialsToken(ctx, issuer, id, secret)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	ccTok, ccExp = tok, exp
-	return tok, nil
+	return tok, exp, nil
 }
 
 // ResetTokenCache clears the in-memory client-credentials token cache. Used in tests.
@@ -108,18 +123,4 @@ func ClientCredsConfigured() bool {
 	return os.Getenv("OIDC_ISSUER") != "" &&
 		os.Getenv("CLI_OIDC_CLIENT_ID") != "" &&
 		os.Getenv("CLI_OIDC_CLIENT_SECRET") != ""
-}
-
-// loadStoredAccessToken reads the default token path and returns the access token
-// string, or an empty string if none is stored.
-func loadStoredAccessToken() (string, error) {
-	path, err := DefaultTokenPath()
-	if err != nil {
-		return "", err
-	}
-	t, err := LoadToken(path)
-	if err != nil {
-		return "", err
-	}
-	return t.AccessToken, nil
 }
