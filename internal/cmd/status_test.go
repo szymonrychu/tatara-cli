@@ -119,14 +119,39 @@ func TestStatus_EnvOverridesURLs(t *testing.T) {
 	require.Contains(t, out, "Chat:     https://chat.env")
 }
 
-// Finding 6: a token expiring exactly now (d==0) should read "valid for 0s", not "expired 0s ago".
+// A token that expires exactly now is already slightly in the past by the time
+// expiryDesc runs. After the sign-before-rounding fix it must report "expired",
+// not "valid for 0s". A token expiring 1s in the future must still report "valid for".
 func TestStatus_ExpiryAtExactlyNow(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	// Write a token whose ExpiresAt is right now; time.Until rounds to 0s.
+	// ExpiresAt = time.Now() is already expired by the time the status command
+	// reads it. After the fix (sign checked before rounding) it shows "expired".
 	saveToken(t, dir, time.Now())
 	authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
-	require.Contains(t, authLine, "valid for", "token expiring exactly now should not show as expired")
+	require.Contains(t, authLine, "expired", "token expiring exactly now is already in the past; must show expired")
+	require.NotContains(t, authLine, "valid for")
+}
+
+// Finding 3: expiryDesc must check sign before rounding so a sub-second-expired
+// token reports "expired" not "valid for 0s".
+func TestStatus_SubSecondExpiredShowsExpired(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	// 1ms in the past - old code rounds to 0s -> "valid for 0s"; new code -> "expired 0s ago"
+	saveToken(t, dir, time.Now().Add(-time.Millisecond))
+	authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
+	require.Contains(t, authLine, "expired", "sub-second-expired token must report expired, not valid for 0s")
+	require.NotContains(t, authLine, "valid for")
+}
+
+// A token expiring 2s from now must still report "valid for".
+func TestStatus_FutureTokenShowsValidFor(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	saveToken(t, dir, time.Now().Add(2*time.Second))
+	authLine := strings.SplitN(runStatus(t), "\n", 2)[0]
+	require.Contains(t, authLine, "valid for")
 	require.NotContains(t, authLine, "expired")
 }
 

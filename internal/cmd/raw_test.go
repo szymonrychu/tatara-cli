@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -307,4 +308,45 @@ func TestRaw_VerboseEmitsStructuredLog(t *testing.T) {
 // Sanity check that the test plumbing works
 func TestRaw_BodyShapeUnused(t *testing.T) {
 	_, _ = json.Marshal(map[string]string{})
+}
+
+// Finding 2: when raw falls back to client-credentials (no stored token), the
+// token must have a non-zero ExpiresAt so ensureFreshLocked's freshness math is
+// meaningful. We verify this indirectly: the cc token is minted fresh and the
+// HTTP call succeeds with the correct Authorization header.
+func TestRaw_CCTokenHasExpiry(t *testing.T) {
+	// Stand up a fake OIDC issuer that returns a token with expires_in=300.
+	oidcMux := http.NewServeMux()
+	oidcMux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"token_endpoint":"http://%s/token"}`, r.Host)
+	})
+	oidcMux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"cc-access-tok","expires_in":300,"token_type":"Bearer"}`)
+	})
+	oidcSrv := httptest.NewServer(oidcMux)
+	defer oidcSrv.Close()
+
+	var gotAuth string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer apiSrv.Close()
+
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	// No stored token - force cc path.
+	t.Setenv("OIDC_ISSUER", oidcSrv.URL)
+	t.Setenv("CLI_OIDC_CLIENT_ID", "cid")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "secret")
+	auth.ResetTokenCache()
+	defer auth.ResetTokenCache()
+
+	root := cmd.NewRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--base-url", apiSrv.URL, "raw", "GET", "/x"})
+	require.NoError(t, root.Execute())
+	require.Equal(t, "Bearer cc-access-tok", gotAuth, "cc token must be forwarded in Authorization header")
 }

@@ -97,6 +97,36 @@ func AccessToken(ctx context.Context) (string, error) {
 	return tok, nil
 }
 
+// AccessTokenWithExpiry is like AccessToken but also returns the token expiry.
+// For client_credentials tokens the expiry is sourced from the OIDC expires_in
+// response field. For stored (device-flow) tokens the expiry is whatever was
+// saved in the token file.
+func AccessTokenWithExpiry(ctx context.Context) (string, time.Time, error) {
+	path, err := DefaultTokenPath()
+	if err == nil {
+		if t, lerr := LoadToken(path); lerr == nil && t.AccessToken != "" {
+			return t.AccessToken, t.ExpiresAt, nil
+		}
+	}
+	issuer := os.Getenv("OIDC_ISSUER")
+	id := os.Getenv("CLI_OIDC_CLIENT_ID")
+	secret := os.Getenv("CLI_OIDC_CLIENT_SECRET")
+	if issuer == "" || id == "" || secret == "" {
+		return "", time.Time{}, ErrNoToken
+	}
+	ccMu.Lock()
+	defer ccMu.Unlock()
+	if ccTok != "" && time.Now().Before(ccExp.Add(-30*time.Second)) {
+		return ccTok, ccExp, nil
+	}
+	tok, exp, err := ClientCredentialsToken(ctx, issuer, id, secret)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	ccTok, ccExp = tok, exp
+	return tok, exp, nil
+}
+
 // ResetTokenCache clears the in-memory client-credentials token cache. Used in tests.
 func ResetTokenCache() {
 	ccMu.Lock()

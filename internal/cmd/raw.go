@@ -57,11 +57,11 @@ func newRawCmd() *cobra.Command {
 			}
 			token, err := auth.LoadToken(tokenPath)
 			if err != nil {
-				tokStr, ccErr := auth.AccessToken(ctx)
+				tokStr, exp, ccErr := auth.AccessTokenWithExpiry(ctx)
 				if ccErr != nil {
 					return ccErr
 				}
-				token = &auth.Token{AccessToken: tokStr, TokenType: "Bearer"}
+				token = &auth.Token{AccessToken: tokStr, ExpiresAt: exp, TokenType: "Bearer"}
 				tokenPath = ""
 			}
 
