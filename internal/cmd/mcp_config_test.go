@@ -90,6 +90,17 @@ func TestMCPConfig_ForceOverwrites(t *testing.T) {
 	require.NotEqual(t, "/somewhere/else", tatara["command"])
 }
 
+// TestMCPConfig_NonExistentDirGivesClearError verifies finding 5: passing a
+// typo'd DIR that does not exist on disk must produce a clear error naming
+// the path, not a low-level "no such file or directory".
+func TestMCPConfig_NonExistentDirGivesClearError(t *testing.T) {
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"mcp-config", "/nonexistent/does/not/exist"})
+	err := root.Execute()
+	require.Error(t, err, "mcp-config with a missing dir must error")
+	require.Contains(t, err.Error(), "mcp-config", "error must name the mcp-config command for context")
+}
+
 func TestMCPConfig_SameCommandIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	root := cmd.NewRootCmd()

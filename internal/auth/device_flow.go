@@ -115,8 +115,11 @@ func (d *DeviceFlow) exchange(ctx context.Context, deviceCode string) (*Token, e
 	body.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 	body.Set("device_code", deviceCode)
 	body.Set("client_id", d.ClientID)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		d.Issuer+"/protocol/openid-connect/token", strings.NewReader(body.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("auth: build token request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := d.httpClient().Do(req)
 	if err != nil {

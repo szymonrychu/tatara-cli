@@ -1264,7 +1264,7 @@ func TestCommentOnIssueTool_BuildPath(t *testing.T) {
 	require.Equal(t, "/projects/myproj/issue-comment", p)
 	bm := body.(map[string]any)
 	require.Equal(t, "szymonrychu/tatara", bm["repo"])
-	require.Equal(t, float64(42), bm["number"])
+	require.Equal(t, int64(42), bm["number"])
 	require.Equal(t, "this duplicates #7", bm["body"])
 }
 
@@ -1305,6 +1305,71 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
 	require.Len(t, OperatorTools(), 18)
+}
+
+// Finding r3-1: bulk_create_memories schema must expose repo, reconcile_files, and
+// items[].idempotency_key so CLI-driven callers can do reconcile-aware, idempotent ingests.
+func TestBulkCreateMemories_SchemaExposesReconcileFields(t *testing.T) {
+	tl := toolByName(t, "bulk_create_memories")
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+	props, _ := schema["properties"].(map[string]any)
+	_, hasRepo := props["repo"]
+	require.True(t, hasRepo, "bulk_create_memories schema must expose repo")
+	_, hasReconcile := props["reconcile_files"]
+	require.True(t, hasReconcile, "bulk_create_memories schema must expose reconcile_files")
+	// items must allow idempotency_key per item
+	itemsProp, _ := props["items"].(map[string]any)
+	itemSchema, _ := itemsProp["items"].(map[string]any)
+	itemProps, _ := itemSchema["properties"].(map[string]any)
+	_, hasKey := itemProps["idempotency_key"]
+	require.True(t, hasKey, "bulk_create_memories items schema must expose idempotency_key")
+}
+
+// Finding r3-2: argString must not have a dead `case int` branch (JSON numbers are float64).
+func TestArgString_NoIntCase(t *testing.T) {
+	// JSON-decoded numbers always arrive as float64. Verify float64 works and int
+	// is never needed (the `case int` branch was dead code).
+	a := map[string]any{"n": float64(7)}
+	require.Equal(t, "7", argString(a, "n"))
+	a2 := map[string]any{"f": float64(3.14)}
+	require.Equal(t, "3.14", argString(a2, "f"))
+	// string still works
+	a3 := map[string]any{"s": "hello"}
+	require.Equal(t, "hello", argString(a3, "s"))
+	// missing key
+	require.Equal(t, "", argString(map[string]any{}, "x"))
+}
+
+// Finding r3-5: comment_on_issue must coerce/validate number before dispatch.
+// A non-numeric string must be rejected with a clear error.
+func TestCommentOnIssue_NumberStringRejected(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "p")
+	_, _, _, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"repo": "r", "number": "not-a-number", "body": "b",
+	})
+	require.Error(t, err, "non-numeric string number must be rejected with a clear error")
+	require.Contains(t, err.Error(), "number", "error must mention number")
+}
+
+// Finding r3-5: number=0 must be rejected (operator enforces Number > 0).
+func TestCommentOnIssue_NumberZeroRejected(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "p")
+	_, _, _, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"repo": "r", "number": float64(0), "body": "b",
+	})
+	require.Error(t, err, "zero number must be rejected")
+}
+
+// Finding r3-5: number as float64 integer must coerce to int in body.
+func TestCommentOnIssue_NumberCoercedToInt(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "p")
+	_, _, body, err := operatorToolByName(t, "comment_on_issue").Build(map[string]any{
+		"repo": "r", "number": float64(42), "body": "b",
+	})
+	require.NoError(t, err)
+	bm := body.(map[string]any)
+	require.Equal(t, int64(42), bm["number"], "number must be coerced to int64 in body")
 }
 
 // Finding #1: Invoke must return error when body read fails (not silently truncate).

@@ -30,8 +30,16 @@ var (
 		Name: "tatara_token_refresh_total",
 		Help: "Total token refresh attempts, partitioned by result.",
 	}, []string{"result"})
+
+	// ClientCredsMintTotal counts client_credentials token mint attempts
+	// partitioned by result ("ok" or "error"). This is the primary auth path
+	// for agent pods; operators need visibility into its failure rate.
+	ClientCredsMintTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "tatara_client_creds_mint_total",
+		Help: "Total client_credentials token mint attempts, partitioned by result.",
+	}, []string{"result"})
 )
 
 func init() {
-	prometheus.MustRegister(ToolCallsTotal, ToolCallDurationMs, TokenRefreshTotal)
+	prometheus.MustRegister(ToolCallsTotal, ToolCallDurationMs, TokenRefreshTotal, ClientCredsMintTotal)
 }

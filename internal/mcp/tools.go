@@ -69,8 +69,8 @@ func AllTools() []Tool {
 		},
 		{
 			Name:        "bulk_create_memories",
-			Description: "Submit a batch of memories for async ingest.",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object"}},"required":["text"]}}},"required":["items"],"additionalProperties":false}`),
+			Description: "Submit a batch of memories for async ingest. Optionally supply repo + reconcile_files for a reconcile-aware ingest, and per-item idempotency_key for idempotent retries (mirrors the ingester producer contract).",
+			Schema:      json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string","description":"Repository reference for reconcile-scoped ingest (e.g. szymonrychu/tatara-memory)."},"reconcile_files":{"type":"boolean","description":"When true, files already in the repo that are not in this batch are removed from the index."},"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"metadata":{"type":"object"},"idempotency_key":{"type":"string","description":"Optional stable key for idempotent retries; server skips duplicate inserts with the same key."}},"required":["text"]}}},"required":["items"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				return http.MethodPost, "/memories:bulk", a, nil
 			},
@@ -259,6 +259,8 @@ func codeGet(path string, required []string, optional []string) func(map[string]
 }
 
 // argString coerces string or JSON number args to a string.
+// JSON-decoded numbers always arrive as float64 (never int); the float64 branch
+// handles both integer-valued and fractional numbers.
 func argString(a map[string]any, k string) string {
 	switch v := a[k].(type) {
 	case string:
@@ -268,8 +270,6 @@ func argString(a map[string]any, k string) string {
 			return strconv.FormatInt(int64(v), 10)
 		}
 		return strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(v)
 	default:
 		return ""
 	}
@@ -558,15 +558,20 @@ func OperatorTools() []Tool {
 				if argString(a, "repo") == "" {
 					return "", "", nil, fmt.Errorf("repo required")
 				}
-				if _, ok := a["number"]; !ok {
+				numStr := argString(a, "number")
+				if numStr == "" {
 					return "", "", nil, fmt.Errorf("number required")
+				}
+				numInt, err := strconv.ParseInt(numStr, 10, 64)
+				if err != nil || numInt <= 0 {
+					return "", "", nil, fmt.Errorf("number must be a positive integer")
 				}
 				if argString(a, "body") == "" {
 					return "", "", nil, fmt.Errorf("body required")
 				}
 				body := map[string]any{
 					"repo":   a["repo"],
-					"number": a["number"],
+					"number": numInt,
 					"body":   a["body"],
 				}
 				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/issue-comment", body, nil

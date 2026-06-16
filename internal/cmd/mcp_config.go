@@ -26,6 +26,14 @@ func newMCPConfigCmd() *cobra.Command {
 				return err
 			}
 
+			// Stat the directory early so a typo'd path produces a clear error
+			// naming the missing dir rather than a low-level WriteFile failure.
+			if fi, serr := os.Stat(dir); serr != nil {
+				return fmt.Errorf("mcp-config: %s: %w", dir, serr)
+			} else if !fi.IsDir() {
+				return fmt.Errorf("mcp-config: %s is not a directory", dir)
+			}
+
 			path := filepath.Join(dir, ".mcp.json")
 			cfg := map[string]any{}
 			if b, err := os.ReadFile(path); err == nil { //nolint:gosec // path is caller-supplied project dir
@@ -59,7 +67,7 @@ func newMCPConfigCmd() *cobra.Command {
 				return err
 			}
 			if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil { //nolint:gosec // .mcp.json is committed in repos; 0o644 is correct
-				return err
+				return fmt.Errorf("mcp-config: write %s: %w", path, err)
 			}
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Wrote tatara MCP entry to %s\n", path)
 			return nil

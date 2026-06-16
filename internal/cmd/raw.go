@@ -37,6 +37,9 @@ func newRawCmd() *cobra.Command {
 				return err
 			}
 
+			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
+			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
+
 			var base string
 			switch targetFlag {
 			case "memory":
@@ -44,9 +47,9 @@ func newRawCmd() *cobra.Command {
 				project, _ := cmd.Flags().GetString("project")
 				base = client.MemoryURLForProject(base, project)
 			case "operator":
-				base = client.ResolveOperatorBaseURL(baseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
+				base = client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			case "chat":
-				base = client.ResolveChatBaseURL(baseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
+				base = client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
 			default:
 				return fmt.Errorf("invalid --target %q: must be one of memory, operator, chat", targetFlag)
 			}
@@ -103,6 +106,17 @@ func newRawCmd() *cobra.Command {
 					return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
 				}
 				cfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
+			} else {
+				// Client-credentials fallback: wire a refresh func so that an expiring
+				// cc token is re-minted instead of being sent stale and returning 401.
+				// Mirrors the same fix in resolveMCPToken (mcp.go).
+				cfg.Refresh = func(ctx context.Context, _ *auth.Token) (*auth.Token, error) {
+					s, e, err := auth.AccessTokenWithExpiry(ctx)
+					if err != nil {
+						return nil, err
+					}
+					return &auth.Token{AccessToken: s, ExpiresAt: e, TokenType: "Bearer"}, nil
+				}
 			}
 			cli, err := client.New(cfg)
 			if err != nil {
@@ -126,5 +140,7 @@ func newRawCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&dataFlag, "data", "d", "", "Request body (literal JSON, @file, or - for stdin)")
 	cmd.Flags().StringVar(&targetFlag, "target", "memory", "Backend to call: memory, operator, or chat")
+	cmd.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
+	cmd.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	return cmd
 }

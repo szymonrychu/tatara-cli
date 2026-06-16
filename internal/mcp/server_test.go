@@ -210,6 +210,45 @@ func TestRegister_204ReturnsOKMarker(t *testing.T) {
 	require.Contains(t, text, "ok", "204 response must contain ok marker")
 }
 
+// TestRegister_LogsResourceID verifies that the INFO log carries resource_id
+// extracted from the tool args (hard rule 12: structured fields including resource_id).
+func TestRegister_LogsResourceID(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"mem-42"}`))
+	}))
+	defer backend.Close()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
+		freshClient(t, backend.URL), logger)
+
+	ctx := context.Background()
+	cli, err := mcpclient.NewInProcessClient(srv.srv)
+	require.NoError(t, err)
+	defer func() { _ = cli.Close() }()
+	require.NoError(t, cli.Start(ctx))
+
+	var initReq mcplib.InitializeRequest
+	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
+	_, err = cli.Initialize(ctx, initReq)
+	require.NoError(t, err)
+
+	// get_memory has an "id" arg — the canonical resource_id.
+	var req mcplib.CallToolRequest
+	req.Params.Name = "get_memory"
+	req.Params.Arguments = map[string]any{"id": "mem-42"}
+	res, err := cli.CallTool(ctx, req)
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	logged := buf.String()
+	assert.Contains(t, logged, "resource_id", "INFO log must carry resource_id")
+	assert.Contains(t, logged, "mem-42", "resource_id must equal the id arg")
+}
+
 // TestRegister_MetricsIncremented verifies that a successful tool call
 // increments ToolCallsTotal{tool, "ok"} (hard rule 13).
 func TestRegister_MetricsIncremented(t *testing.T) {
