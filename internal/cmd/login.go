@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +16,9 @@ func newLoginCmd() *cobra.Command {
 		Short: "Authenticate against Keycloak via OIDC device flow.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			verbose, _ := cmd.Root().PersistentFlags().GetCount("verbose")
+			log := slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: verboseLevel(verbose)}))
+
 			path, err := auth.DefaultTokenPath()
 			if err != nil {
 				return err
@@ -23,6 +28,7 @@ func newLoginCmd() *cobra.Command {
 				ClientID: DefaultClientID,
 				Scope:    DefaultScope,
 			}
+			start := time.Now()
 			code, err := flow.Start(ctx)
 			if err != nil {
 				return err
@@ -35,6 +41,7 @@ func newLoginCmd() *cobra.Command {
 			if err := auth.SaveToken(path, token); err != nil {
 				return err
 			}
+			log.Info("auth lifecycle", "action", "login", "result", "ok", "duration_ms", time.Since(start).Milliseconds())
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Logged in. Token saved to %s\n", path)
 			return nil
 		},

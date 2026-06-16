@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // ccHTTPClient is a shared http.Client with a per-request timeout, matching
@@ -24,16 +26,19 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, disco, nil) //nolint:gosec // issuer URL is operator-injected env
 	resp, err := ccHTTPClient.Do(req)                                     //nolint:gosec // taint flows from the nolinted line above
 	if err != nil {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("oidc discovery: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("oidc discovery: status %d", resp.StatusCode)
 	}
 	var meta struct {
 		TokenEndpoint string `json:"token_endpoint"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil || meta.TokenEndpoint == "" {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, errors.New("oidc discovery: no token_endpoint")
 	}
 	form := url.Values{"grant_type": {"client_credentials"}}
@@ -44,10 +49,12 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 	treq.SetBasicAuth(clientID, clientSecret)
 	tresp, err := ccHTTPClient.Do(treq) //nolint:gosec // token endpoint URL is from issuer discovery, operator-injected
 	if err != nil {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("token request: %w", err)
 	}
 	defer func() { _ = tresp.Body.Close() }()
 	if tresp.StatusCode != http.StatusOK {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("token request: status %d", tresp.StatusCode)
 	}
 	var tr struct {
@@ -55,11 +62,14 @@ func ClientCredentialsToken(ctx context.Context, issuer, clientID, clientSecret 
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.NewDecoder(tresp.Body).Decode(&tr); err != nil {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, fmt.Errorf("token decode: %w", err)
 	}
 	if tr.AccessToken == "" {
+		obs.ClientCredsMintTotal.WithLabelValues("error").Inc()
 		return "", time.Time{}, errors.New("token response: empty access_token")
 	}
+	obs.ClientCredsMintTotal.WithLabelValues("ok").Inc()
 	return tr.AccessToken, time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second), nil
 }
 

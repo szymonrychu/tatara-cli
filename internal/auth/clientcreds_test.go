@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 func newFakeIssuer(t *testing.T) *httptest.Server {
@@ -122,6 +125,29 @@ func TestClientCredentialsTokenEmptyAccessToken(t *testing.T) {
 	_, _, err := auth.ClientCredentialsToken(context.Background(), srv.URL, "cid", "secret")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "empty access_token")
+}
+
+// TestClientCredsMintTotal_IncrementedOnSuccess verifies that a successful cc mint
+// increments obs.ClientCredsMintTotal{result="ok"} (hard rule 13).
+func TestClientCredsMintTotal_IncrementedOnSuccess(t *testing.T) {
+	srv := newFakeIssuer(t)
+	defer srv.Close()
+
+	before := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("ok"))
+	_, _, err := auth.ClientCredentialsToken(context.Background(), srv.URL, "cid", "secret")
+	require.NoError(t, err)
+	after := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("ok"))
+	assert.Equal(t, before+1, after, "ClientCredsMintTotal{ok} must increment on success")
+}
+
+// TestClientCredsMintTotal_IncrementedOnError verifies that a failed cc mint
+// increments obs.ClientCredsMintTotal{result="error"} (hard rule 13).
+func TestClientCredsMintTotal_IncrementedOnError(t *testing.T) {
+	before := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("error"))
+	_, _, err := auth.ClientCredentialsToken(context.Background(), "http://127.0.0.1:1", "cid", "secret")
+	require.Error(t, err)
+	after := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("error"))
+	assert.Equal(t, before+1, after, "ClientCredsMintTotal{error} must increment on error")
 }
 
 // Finding: ClientCredentialsToken must respect context cancellation (proves it does not

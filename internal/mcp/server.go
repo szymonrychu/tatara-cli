@@ -69,21 +69,35 @@ func buildTool(t Tool) mcplib.Tool {
 	return mcplib.NewToolWithRawSchema(t.Name, t.Description, t.Schema)
 }
 
+// resourceID extracts the resource being acted on from args. It checks the
+// common identifier keys in priority order, then falls back to TATARA_TASK env.
+func resourceID(args map[string]any) string {
+	for _, key := range []string{"id", "task", "repo", "room_id", "subtask"} {
+		if v, ok := args[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return os.Getenv("TATARA_TASK")
+}
+
 func (s *Server) register(t Tool) {
 	tool := buildTool(t)
 	s.srv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 		start := time.Now()
 		args := req.GetArguments()
+		rid := resourceID(args)
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		elapsedMs := float64(time.Since(start).Milliseconds())
 		obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
 		if err != nil {
 			obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
-			s.log.Error("tool error", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "err", err)
+			s.log.Error("tool error", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "resource_id", rid, "err", err)
 			return mcplib.NewToolResultError(err.Error()), nil
 		}
 		obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
-		s.log.Info("tool call", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "status", "ok")
+		s.log.Info("tool call", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "resource_id", rid, "status", "ok")
 		if len(body) == 0 {
 			return mcplib.NewToolResultText(`{"ok":true}`), nil
 		}
