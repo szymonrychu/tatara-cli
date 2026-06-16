@@ -277,6 +277,33 @@ func TestRaw_NoTokenSurfacesErrNoToken(t *testing.T) {
 	require.ErrorIs(t, err, auth.ErrNoToken)
 }
 
+// TestRaw_VerboseEmitsStructuredLog verifies that passing -v causes the raw
+// command to emit a structured JSON INFO log for the business action
+// (method/path/status_code/duration_ms) to stderr, satisfying hard rule 12.
+func TestRaw_VerboseEmitsStructuredLog(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	root := cmd.NewRootCmd()
+	out, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(errBuf)
+	// -v sets INFO level; the client.Do structured log fires.
+	root.SetArgs([]string{"--base-url", srv.URL, "-v", "raw", "GET", "/memories/x"})
+	require.NoError(t, root.Execute())
+
+	stderr := errBuf.String()
+	require.Contains(t, stderr, "client.Do", "INFO structured log must contain client.Do action")
+	require.Contains(t, stderr, "status_code", "INFO structured log must contain status_code field")
+	require.Contains(t, stderr, "duration_ms", "INFO structured log must contain duration_ms field")
+}
+
 // Sanity check that the test plumbing works
 func TestRaw_BodyShapeUnused(t *testing.T) {
 	_, _ = json.Marshal(map[string]string{})

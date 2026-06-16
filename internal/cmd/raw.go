@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -87,10 +88,14 @@ func newRawCmd() *cobra.Command {
 				body = strings.NewReader(dataFlag)
 			}
 
+			verbose, _ := cmd.Flags().GetCount("verbose")
+			rawLogger := slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: verboseLevel(verbose)}))
+
 			cfg := client.Config{
 				BaseURL:   base,
 				Token:     token,
 				TokenPath: tokenPath,
+				Log:       rawLogger,
 			}
 			if tokenPath != "" {
 				cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }

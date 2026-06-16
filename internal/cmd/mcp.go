@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
@@ -131,11 +133,27 @@ func newMCPCmd() *cobra.Command {
 			}
 
 			srv := mcp.NewServer(cli, opCli, chatCli, logger)
+
+			metricsAddr, _ := cmd.Flags().GetString("metrics-addr")
+			if metricsAddr != "" {
+				mux := http.NewServeMux()
+				mux.Handle("/metrics", promhttp.Handler())
+				metricsSrv := &http.Server{Addr: metricsAddr, Handler: mux} //nolint:gosec // user-supplied addr
+				go func() {
+					if serr := metricsSrv.ListenAndServe(); serr != nil && serr != http.ErrServerClosed {
+						logger.Error("metrics server error", "err", serr)
+					}
+				}()
+				defer func() { _ = metricsSrv.Shutdown(context.Background()) }()
+				logger.Info("metrics server started", "addr", metricsAddr)
+			}
+
 			return srv.Run(ctx)
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
 	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
+	c.Flags().String("metrics-addr", os.Getenv("TATARA_MCP_METRICS_ADDR"), "TCP address for the /metrics HTTP endpoint (e.g. 127.0.0.1:9090); empty disables it")
 	return c
 }
 
