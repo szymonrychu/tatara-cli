@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -145,7 +146,14 @@ func newMCPCmd() *cobra.Command {
 			if metricsAddr != "" {
 				mux := http.NewServeMux()
 				mux.Handle("/metrics", promhttp.Handler())
-				metricsSrv := &http.Server{Addr: metricsAddr, Handler: mux} //nolint:gosec // user-supplied addr
+				metricsSrv := &http.Server{ //nolint:gosec // user-supplied addr
+					Addr:              metricsAddr,
+					Handler:           mux,
+					ReadHeaderTimeout: 5 * time.Second,
+					ReadTimeout:       10 * time.Second,
+					WriteTimeout:      10 * time.Second,
+					IdleTimeout:       60 * time.Second,
+				}
 				go func() {
 					if serr := metricsSrv.ListenAndServe(); serr != nil && serr != http.ErrServerClosed {
 						logger.Error("metrics server error", "err", serr)
