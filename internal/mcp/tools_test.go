@@ -1522,3 +1522,57 @@ func TestProposeIssue_RepositoryRefArgIgnored(t *testing.T) {
 	// repositoryRef is no longer a valid input; without repo the build must fail.
 	require.Error(t, err, "propose_issue must fail when only repositoryRef is provided (schema no longer advertises it)")
 }
+
+func TestProposeIssue_SchemaHasOptionalSystemicID(t *testing.T) {
+	tl := operatorToolByName(t, "propose_issue")
+	schema := string(tl.Schema)
+	require.Contains(t, schema, `"systemicId"`,
+		"propose_issue schema must advertise systemicId property")
+	require.Contains(t, schema, `"systemicId":{"type":"string"`,
+		"systemicId must be a string property")
+
+	// systemicId must NOT be required: decode the schema and inspect the
+	// required list so a future reorder of properties cannot make this pass
+	// by accident.
+	var parsed struct {
+		Required []string `json:"required"`
+	}
+	require.NoError(t, json.Unmarshal(tl.Schema, &parsed))
+	require.NotContains(t, parsed.Required, "systemicId",
+		"systemicId must stay optional (not in required)")
+	// The existing required set is unchanged.
+	require.ElementsMatch(t, []string{"title", "body", "kind", "repo"}, parsed.Required)
+}
+
+func TestProposeIssue_SystemicIDForwarded(t *testing.T) {
+	t.Run("supplied systemicId is forwarded under the systemicId key", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "propose_issue").Build(map[string]any{
+			"project":    "alpha",
+			"repo":       "szymonrychu/tatara",
+			"title":      "feat: add platform-wide /metrics endpoint",
+			"body":       "b",
+			"kind":       "improvement",
+			"systemicId": "sys-7f3a",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		require.Equal(t, "sys-7f3a", m["systemicId"])
+		// existing keys are untouched
+		require.Equal(t, "szymonrychu/tatara", m["repositoryRef"])
+		require.Equal(t, "improvement", m["kind"])
+	})
+
+	t.Run("omitted systemicId leaves the payload unchanged", func(t *testing.T) {
+		_, _, body, err := operatorToolByName(t, "propose_issue").Build(map[string]any{
+			"project": "alpha",
+			"repo":    "szymonrychu/tatara",
+			"title":   "t",
+			"body":    "b",
+			"kind":    "bug",
+		})
+		require.NoError(t, err)
+		m := body.(map[string]any)
+		_, has := m["systemicId"]
+		require.False(t, has, "systemicId must be absent when the agent did not supply it")
+	})
+}
