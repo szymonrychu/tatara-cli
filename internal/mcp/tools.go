@@ -394,7 +394,7 @@ func OperatorTools() []Tool {
 				return http.MethodPatch, "/subtasks/" + url.PathEscape(st), body, nil
 			}),
 		op("propose_issue", "Propose a new SCM issue (bug or improvement). The operator opens it under the bot identity as an idea-labelled discovery issue; it stays in discussion until a human approves. Embed <!-- tatara-authored --> in the body to keep it in discovery. project defaults to TATARA_PROJECT env when omitted.",
-			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]}},"required":["title","body","kind","repo"]}`,
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"kind":{"type":"string","enum":["bug","improvement"]},"systemicId":{"type":"string","description":"Optional shared id grouping several issues that are one systemic, cross-repo improvement. Call propose_issue once per affected repo with the same systemicId; the operator stamps a tatara/systemic-<id> label and the group counts as one against the proposal cap."}},"required":["title","body","kind","repo"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
@@ -418,6 +418,9 @@ func OperatorTools() []Tool {
 					"title":         a["title"],
 					"body":          a["body"],
 					"kind":          a["kind"],
+				}
+				if v, ok := a["systemicId"]; ok {
+					body["systemicId"] = v
 				}
 				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/issues", body, nil
 			}),
