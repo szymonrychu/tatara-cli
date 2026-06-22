@@ -114,7 +114,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 18)
+	require.Len(t, OperatorTools(), 19)
 }
 
 func TestDeclineImplementation_Build(t *testing.T) {
@@ -1304,7 +1304,7 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 }
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
-	require.Len(t, OperatorTools(), 18)
+	require.Len(t, OperatorTools(), 19)
 }
 
 // Finding r3-1: bulk_create_memories schema must expose repo, reconcile_files, and
@@ -1542,6 +1542,43 @@ func TestProposeIssue_SchemaHasOptionalSystemicID(t *testing.T) {
 		"systemicId must stay optional (not in required)")
 	// The existing required set is unchanged.
 	require.ElementsMatch(t, []string{"title", "body", "kind", "repo"}, parsed.Required)
+}
+
+func TestSkipBrainstormTool(t *testing.T) {
+	t.Run("explicit task + reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		m, p, body, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+			"task":   "t-123",
+			"reason": "nothing worth proposing",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t-123/brainstorm-outcome", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "none", bm["action"])
+		require.Equal(t, "nothing worth proposing", bm["reason"])
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+			"reason": "scanned all open issues, nothing novel",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/brainstorm-outcome", p)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+			"reason": "nothing",
+		})
+		require.Error(t, err)
+	})
+}
+
+func TestSkipBrainstormRequiresReason(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t-1")
+	_, _, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{"task": "t-1"})
+	require.Error(t, err, "expected error when reason missing")
 }
 
 func TestProposeIssue_SystemicIDForwarded(t *testing.T) {

@@ -538,6 +538,22 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/implement-outcome", body, nil
 			}),
+		op("skip_brainstorm", "Declare that this brainstorm cycle has nothing worth proposing, and exit early WITHOUT running the full deep-research fan-out. Call this after a cheap initial survey when no genuinely novel, high-leverage idea exists. Records the reason and ends the turn so no tokens are wasted.",
+			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"Why there is nothing to propose this cycle (what you scanned, why no new idea clears the bar)."}},"required":["reason"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if argString(a, "reason") == "" {
+					return "", "", nil, fmt.Errorf("reason required")
+				}
+				body := map[string]any{
+					"action": "none",
+					"reason": a["reason"],
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/brainstorm-outcome", body, nil
+			}),
 		op("comment", "Post a free-form comment on the current task's linked issue (answer maintainer questions, post design notes). The operator posts it under the bot identity on the next reconcile and does NOT change the issue's lifecycle state. Use this to keep a discovery conversation alive; use issue_outcome to set the outcome.",
 			`{"type":"object","properties":{"task":{"type":"string"},"body":{"type":"string"}},"required":["body"]}`,
 			func(a map[string]any) (string, string, any, error) {
