@@ -79,7 +79,7 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	for _, tl := range listRes.Tools {
 		exposed[tl.Name] = true
 	}
-	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue", "chat_create_room"} {
+	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue", "chat_create_room", "skip_research"} {
 		assert.Truef(t, exposed[want], "tools/list must expose %q", want)
 	}
 

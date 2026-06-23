@@ -1544,10 +1544,10 @@ func TestProposeIssue_SchemaHasOptionalSystemicID(t *testing.T) {
 	require.ElementsMatch(t, []string{"title", "body", "kind", "repo"}, parsed.Required)
 }
 
-func TestSkipBrainstormTool(t *testing.T) {
+func TestSkipResearchTool(t *testing.T) {
 	t.Run("explicit task + reason", func(t *testing.T) {
 		t.Setenv("TATARA_TASK", "")
-		m, p, body, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+		m, p, body, err := operatorToolByName(t, "skip_research").Build(map[string]any{
 			"task":   "t-123",
 			"reason": "nothing worth proposing",
 		})
@@ -1560,7 +1560,7 @@ func TestSkipBrainstormTool(t *testing.T) {
 	})
 	t.Run("env fallback", func(t *testing.T) {
 		t.Setenv("TATARA_TASK", "env-task")
-		_, p, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+		_, p, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{
 			"reason": "scanned all open issues, nothing novel",
 		})
 		require.NoError(t, err)
@@ -1568,17 +1568,56 @@ func TestSkipBrainstormTool(t *testing.T) {
 	})
 	t.Run("require task", func(t *testing.T) {
 		t.Setenv("TATARA_TASK", "")
-		_, _, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{
+		_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{
 			"reason": "nothing",
 		})
 		require.Error(t, err)
 	})
 }
 
-func TestSkipBrainstormRequiresReason(t *testing.T) {
+func TestSkipResearchRequiresReason(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t-1")
-	_, _, _, err := operatorToolByName(t, "skip_brainstorm").Build(map[string]any{"task": "t-1"})
+	_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{"task": "t-1"})
 	require.Error(t, err, "expected error when reason missing")
+}
+
+func TestSkipResearch_Build(t *testing.T) {
+	t.Run("explicit task + reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		m, p, body, err := operatorToolByName(t, "skip_research").Build(map[string]any{
+			"task":   "t1",
+			"reason": "no novel net-new angle this cycle",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t1/brainstorm-outcome", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "none", bm["action"])
+		require.Equal(t, "no novel net-new angle this cycle", bm["reason"])
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{
+			"reason": "already covered by #42",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/brainstorm-outcome", p)
+	})
+	t.Run("require reason blank", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{})
+		require.Error(t, err)
+	})
+	t.Run("require reason whitespace", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{"reason": "   "})
+		require.Error(t, err)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{"reason": "x"})
+		require.Error(t, err)
+	})
 }
 
 func TestProposeIssue_SystemicIDForwarded(t *testing.T) {
