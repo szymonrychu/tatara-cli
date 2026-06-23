@@ -538,14 +538,14 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/implement-outcome", body, nil
 			}),
-		op("skip_brainstorm", "Declare that this brainstorm cycle has nothing worth proposing, and exit early WITHOUT running the full deep-research fan-out. Call this after a cheap initial survey when no genuinely novel, high-leverage idea exists. Records the reason and ends the turn so no tokens are wasted.",
-			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"Why there is nothing to propose this cycle (what you scanned, why no new idea clears the bar)."}},"required":["reason"]}`,
+		op("skip_research", "Honestly end a research/brainstorm turn with NO proposal. Call this when, after investigation, you have determined there is no genuinely novel, shippable net-new architecture to propose this cycle. Posts the reason as the brainstorm no-yield outcome and parks the task. A silent finish with no propose_issue and no skip_research call is NOT allowed.",
+			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"Why you are NOT proposing anything this cycle (what you surveyed, why nothing is novel/shippable/in-scope). Posted as the brainstorm outcome."}},"required":["reason"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}
-				if argString(a, "reason") == "" {
+				if strings.TrimSpace(argString(a, "reason")) == "" {
 					return "", "", nil, fmt.Errorf("reason required")
 				}
 				body := map[string]any{
