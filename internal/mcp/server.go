@@ -17,38 +17,46 @@ import (
 
 // Server wraps an mcp-go MCPServer and dispatches tool calls via the HTTP clients.
 type Server struct {
-	srv      *server.MCPServer
-	memory   *client.Client
-	operator *client.Client
-	chat     *client.Client
-	log      *slog.Logger
+	srv       *server.MCPServer
+	memory    *client.Client
+	operator  *client.Client
+	chat      *client.Client
+	log       *slog.Logger
+	toolCount int
+	profile   string
 }
 
-// NewServer registers the tatara-memory tools (against memory), the
-// tatara-operator tools (against operator), and the tatara-chat tools
-// (against chat).
-func NewServer(memory, operator, chat *client.Client, log *slog.Logger) *Server {
+// NewServer registers tools filtered by profile. Empty/unknown profile serves the
+// full set (fail-open). profile is read from TATARA_TOOL_PROFILE env (or --tool-profile
+// flag) and passed in by the caller.
+func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile string) *Server {
+	allow := resolveProfile(profile, log)
 	s := &Server{
 		srv:      server.NewMCPServer("tatara", version.Version, server.WithToolCapabilities(true)),
 		memory:   memory,
 		operator: operator,
 		chat:     chat,
 		log:      log,
+		profile:  profile,
 	}
-	for _, t := range AllTools() {
-		s.register(t)
+	allTools := append(append(append(AllTools(), OperatorTools()...), ChatTools()...), PlatformTools()...)
+	for _, t := range allTools {
+		if allow == nil || allow[t.Name] {
+			s.register(t)
+			s.toolCount++
+		}
 	}
-	for _, t := range OperatorTools() {
-		s.register(t)
+	profileLabel := profile
+	if profileLabel == "" {
+		profileLabel = "all"
 	}
-	for _, t := range ChatTools() {
-		s.register(t)
-	}
+	obs.RegisteredTools.WithLabelValues(profileLabel).Set(float64(s.toolCount))
+	log.Info("mcp server started", "profile", profile, "registered_tools", s.toolCount)
 	return s
 }
 
-// ToolCount returns the number of registered tools (test/observability helper).
-func (s *Server) ToolCount() int { return len(AllTools()) + len(OperatorTools()) + len(ChatTools()) }
+// ToolCount returns the number of registered tools (profile-aware).
+func (s *Server) ToolCount() int { return s.toolCount }
 
 func (s *Server) clientFor(t Tool) *client.Client {
 	switch t.Target {
@@ -88,6 +96,22 @@ func (s *Server) register(t Tool) {
 		start := time.Now()
 		args := req.GetArguments()
 		rid := resourceID(args)
+
+		// Local-handler path: Handler set => skip HTTP round-trip.
+		if t.Handler != nil {
+			result, err := t.Handler(args, s.log)
+			elapsedMs := float64(time.Since(start).Milliseconds())
+			obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
+			if err != nil {
+				obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
+				s.log.Error("tool error", "tool", t.Name, "duration_ms", elapsedMs, "resource_id", rid, "err", err)
+				return mcplib.NewToolResultError(err.Error()), nil
+			}
+			obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
+			s.log.Info("tool call", "tool", t.Name, "duration_ms", elapsedMs, "resource_id", rid, "status", "ok")
+			return mcplib.NewToolResultText(result), nil
+		}
+
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		elapsedMs := float64(time.Since(start).Milliseconds())
 		obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)

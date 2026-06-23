@@ -4,19 +4,58 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
+
+// discardLogger returns a *slog.Logger that discards all output. Use for tests
+// that exercise validation or metric behaviour but do not assert log records.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// captureHandler is a minimal slog.Handler that records every log record.
+type captureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h // test-only; attrs not needed
+}
+func (h *captureHandler) WithGroup(name string) slog.Handler {
+	return h // test-only; groups not needed
+}
+func (h *captureHandler) Records() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cp := make([]slog.Record, len(h.records))
+	copy(cp, h.records)
+	return cp
+}
 
 func TestOperatorTools_BuildPaths(t *testing.T) {
 	cases := []struct {
@@ -352,8 +391,10 @@ func freshClient(t *testing.T, baseURL string) *client.Client {
 	return c
 }
 
-func TestAllTools_ThirtyFourEntries(t *testing.T) {
-	assert.Len(t, AllTools(), 34)
+func TestAllTools_ThirtyTwoEntries(t *testing.T) {
+	// After Part B: code_community + code_hyperedge merged into their list counterparts.
+	// 13 memory + 19 code-graph = 32.
+	assert.Len(t, AllTools(), 32)
 }
 
 func TestAllTools_SchemasAreValidJSON(t *testing.T) {
@@ -568,9 +609,9 @@ func TestCodeTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // id required
 }
 
-// TestAllTools_Count verifies the tool registry grows to 34 after Phase 2 additions.
+// TestAllTools_Count verifies the tool registry is 32 after Part B merges.
 func TestAllTools_Count(t *testing.T) {
-	assert.Len(t, AllTools(), 34)
+	assert.Len(t, AllTools(), 32)
 }
 
 func TestNewCodeGraphTools_BuildQueries(t *testing.T) {
@@ -658,8 +699,8 @@ func TestNewCodeGraphTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // repo required
 	_, _, _, err = toolByName(t, "code_related").Build(map[string]any{"id": "x"})
 	require.Error(t, err) // repo required
-	_, _, _, err = toolByName(t, "code_hyperedges").Build(map[string]any{})
-	require.Error(t, err) // repo required
+	_, _, _, err = toolByName(t, "code_hyperedges").Build(map[string]any{"id": "he:r:f:l"})
+	require.Error(t, err) // repo required (merged tool still requires repo)
 	_, _, _, err = toolByName(t, "code_communities").Build(map[string]any{})
 	require.Error(t, err) // repo required
 	_, _, _, err = toolByName(t, "code_bridges").Build(map[string]any{})
@@ -772,26 +813,64 @@ func TestCodeHyperedges_BuildQuery(t *testing.T) {
 	}
 }
 
-func TestCodeHyperedge_BuildQuery(t *testing.T) {
-	var gotPath string
-	var gotQuery url.Values
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotQuery = r.URL.Query()
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-	cli := freshClient(t, srv.URL)
-	_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedge"), map[string]any{"id": "he:r:file:label", "repo": "r"})
-	require.NoError(t, err)
-	require.Equal(t, "/code-graph/hyperedge", gotPath)
-	require.Equal(t, "he:r:file:label", gotQuery.Get("id"))
-	require.Equal(t, "r", gotQuery.Get("repo"))
-}
-
-func TestCodeHyperedge_RequireID(t *testing.T) {
-	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"repo": "r"})
-	require.Error(t, err) // id required
+// TestCodeHyperedges_MergedBehavior verifies the merged code_hyperedges tool
+// (Part B): id set -> single hyperedge; id absent -> list (entity optional).
+func TestCodeHyperedges_MergedBehavior(t *testing.T) {
+	t.Run("id set -> GET /code-graph/hyperedge", func(t *testing.T) {
+		var gotPath string
+		var gotQuery url.Values
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer srv.Close()
+		cli := freshClient(t, srv.URL)
+		_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedges"), map[string]any{"id": "he:r:file:label", "repo": "r"})
+		require.NoError(t, err)
+		require.Equal(t, "/code-graph/hyperedge", gotPath)
+		require.Equal(t, "he:r:file:label", gotQuery.Get("id"))
+		require.Equal(t, "r", gotQuery.Get("repo"))
+	})
+	t.Run("id absent + entity -> GET /code-graph/hyperedges with entity", func(t *testing.T) {
+		var gotPath string
+		var gotQuery url.Values
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer srv.Close()
+		cli := freshClient(t, srv.URL)
+		_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedges"), map[string]any{"entity": "go:func:m.F", "repo": "r"})
+		require.NoError(t, err)
+		require.Equal(t, "/code-graph/hyperedges", gotPath)
+		require.Equal(t, "go:func:m.F", gotQuery.Get("entity"))
+	})
+	t.Run("id wins over entity", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer srv.Close()
+		cli := freshClient(t, srv.URL)
+		_, err := Invoke(context.Background(), cli, toolByName(t, "code_hyperedges"), map[string]any{
+			"id": "he:r:f:l", "entity": "go:func:m.F", "repo": "r",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/code-graph/hyperedge", gotPath, "id must win over entity")
+	})
+	t.Run("repo required", func(t *testing.T) {
+		_, _, _, err := toolByName(t, "code_hyperedges").Build(map[string]any{"id": "he:r:f:l"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "repo required")
+	})
+	t.Run("repo only -> list", func(t *testing.T) {
+		_, p, _, err := toolByName(t, "code_hyperedges").Build(map[string]any{"repo": "r"})
+		require.NoError(t, err)
+		require.Contains(t, p, "/code-graph/hyperedges")
+	})
 }
 
 func TestCodeCommunities_BuildQuery(t *testing.T) {
@@ -824,28 +903,50 @@ func TestCodeCommunities_BuildQuery(t *testing.T) {
 	}
 }
 
-func TestCodeCommunity_BuildQuery(t *testing.T) {
-	var gotPath string
-	var gotQuery url.Values
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotQuery = r.URL.Query()
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-	cli := freshClient(t, srv.URL)
-	_, err := Invoke(context.Background(), cli, toolByName(t, "code_community"), map[string]any{"repo": "r", "community": float64(3)})
-	require.NoError(t, err)
-	require.Equal(t, "/code-graph/community", gotPath)
-	require.Equal(t, "r", gotQuery.Get("repo"))
-	require.Equal(t, "3", gotQuery.Get("community"))
-}
-
-func TestCodeCommunity_RequireArgs(t *testing.T) {
-	_, _, _, err := toolByName(t, "code_community").Build(map[string]any{"community": float64(1)})
-	require.Error(t, err) // repo required
-	_, _, _, err = toolByName(t, "code_community").Build(map[string]any{"repo": "r"})
-	require.Error(t, err) // community required
+// TestCodeCommunities_MergedBehavior verifies the merged code_communities tool
+// (Part B): community set -> list members; community absent -> list all communities.
+func TestCodeCommunities_MergedBehavior(t *testing.T) {
+	t.Run("community set -> GET /code-graph/community", func(t *testing.T) {
+		var gotPath string
+		var gotQuery url.Values
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer srv.Close()
+		cli := freshClient(t, srv.URL)
+		_, err := Invoke(context.Background(), cli, toolByName(t, "code_communities"), map[string]any{"repo": "r", "community": float64(3)})
+		require.NoError(t, err)
+		require.Equal(t, "/code-graph/community", gotPath)
+		require.Equal(t, "r", gotQuery.Get("repo"))
+		require.Equal(t, "3", gotQuery.Get("community"))
+	})
+	t.Run("community absent -> GET /code-graph/communities", func(t *testing.T) {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer srv.Close()
+		cli := freshClient(t, srv.URL)
+		_, err := Invoke(context.Background(), cli, toolByName(t, "code_communities"), map[string]any{"repo": "r"})
+		require.NoError(t, err)
+		require.Equal(t, "/code-graph/communities", gotPath)
+	})
+	t.Run("repo required", func(t *testing.T) {
+		_, _, _, err := toolByName(t, "code_communities").Build(map[string]any{})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "repo required")
+	})
+	t.Run("malformed community key silently falls back to list", func(t *testing.T) {
+		// Silent fallback to list on malformed key (RESOLVED Q1).
+		// A type that argString returns "" for (e.g. bool) falls back to list.
+		// JSON-decoded numbers come as float64; booleans remain bool (unknown to argString).
+		_, p, _, err := toolByName(t, "code_communities").Build(map[string]any{"repo": "r", "community": true})
+		require.NoError(t, err)
+		require.Contains(t, p, "/code-graph/communities", "malformed community must silently fall back to list")
+	})
 }
 
 func TestCodeBridges_BuildQuery(t *testing.T) {
@@ -1247,29 +1348,34 @@ func TestCommentToolRequiresBody(t *testing.T) {
 	}
 }
 
-// Finding 1+2: code_hyperedge must require repo (server handler calls reqRepo first).
-func TestCodeHyperedge_RequireRepo(t *testing.T) {
-	_, _, _, err := toolByName(t, "code_hyperedge").Build(map[string]any{"id": "he:r:f:l"})
-	require.Error(t, err, "code_hyperedge must return error when repo is omitted")
+// TestCodeHyperedges_RequireRepo verifies the merged code_hyperedges tool
+// still requires repo (server handler calls reqRepo first).
+func TestCodeHyperedges_RequireRepo(t *testing.T) {
+	_, _, _, err := toolByName(t, "code_hyperedges").Build(map[string]any{"id": "he:r:f:l"})
+	require.Error(t, err, "code_hyperedges must return error when repo is omitted")
 	require.Contains(t, err.Error(), "repo required")
 }
 
-func TestCodeHyperedge_SchemaRepoRequired(t *testing.T) {
-	tl := toolByName(t, "code_hyperedge")
+func TestCodeHyperedges_SchemaRepoRequired(t *testing.T) {
+	tl := toolByName(t, "code_hyperedges")
 	var schema map[string]any
 	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
 	req, _ := schema["required"].([]any)
-	var hasID, hasRepo bool
+	var hasRepo bool
 	for _, r := range req {
-		if r == "id" {
-			hasID = true
-		}
 		if r == "repo" {
 			hasRepo = true
 		}
 	}
-	require.True(t, hasID, "code_hyperedge schema required must contain id")
-	require.True(t, hasRepo, "code_hyperedge schema required must contain repo")
+	require.True(t, hasRepo, "code_hyperedges schema required must contain repo")
+	// id is now optional (discriminator), not required
+	var hasID bool
+	for _, r := range req {
+		if r == "id" {
+			hasID = true
+		}
+	}
+	require.False(t, hasID, "code_hyperedges schema must NOT have id in required (it is the optional discriminator)")
 }
 
 // Finding 3: patch_entity must validate that patch is present before building the request.
@@ -1677,6 +1783,166 @@ func TestSkipResearch_Build(t *testing.T) {
 		t.Setenv("TATARA_TASK", "")
 		_, _, _, err := operatorToolByName(t, "skip_research").Build(map[string]any{"reason": "x"})
 		require.Error(t, err)
+	})
+}
+
+// --- PlatformTools tests (Part C) ---
+
+func platformToolByName(t *testing.T, name string) Tool {
+	t.Helper()
+	for _, tl := range PlatformTools() {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("platform tool %q not found", name)
+	return Tool{}
+}
+
+func TestPlatformTools_ContainsReportInternalIssue(t *testing.T) {
+	found := false
+	for _, tl := range PlatformTools() {
+		if tl.Name == "report_internal_issue" {
+			found = true
+		}
+	}
+	require.True(t, found, "PlatformTools() must include report_internal_issue")
+}
+
+func TestPlatformTools_Count(t *testing.T) {
+	require.Len(t, PlatformTools(), 1)
+}
+
+func TestReportInternalIssue_SchemaValid(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+	props, _ := schema["properties"].(map[string]any)
+	_, hasCat := props["category"]
+	_, hasSev := props["severity"]
+	_, hasDesc := props["description"]
+	_, hasOffTool := props["offending_tool"]
+	_, hasResID := props["resource_id"]
+	require.True(t, hasCat, "schema must have category")
+	require.True(t, hasSev, "schema must have severity")
+	require.True(t, hasDesc, "schema must have description")
+	require.True(t, hasOffTool, "schema must have offending_tool")
+	require.True(t, hasResID, "schema must have resource_id")
+
+	req, _ := schema["required"].([]any)
+	var hasCatReq, hasDescReq bool
+	for _, r := range req {
+		if r == "category" {
+			hasCatReq = true
+		}
+		if r == "description" {
+			hasDescReq = true
+		}
+	}
+	require.True(t, hasCatReq, "category must be required")
+	require.True(t, hasDescReq, "description must be required")
+}
+
+func TestReportInternalIssue_HasHandler(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+	require.NotNil(t, tl.Handler, "report_internal_issue must have a Handler (no HTTP round-trip)")
+	require.Nil(t, tl.Build, "report_internal_issue must not have a Build func (uses Handler instead)")
+}
+
+func TestReportInternalIssue_HandlerValidation(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+	cases := []struct {
+		name    string
+		args    map[string]any
+		wantErr bool
+		errMsg  string
+	}{
+		{"valid tool_error", map[string]any{"category": "tool_error", "description": "something broke"}, false, ""},
+		{"valid with severity warn", map[string]any{"category": "auth", "severity": "warn", "description": "token expired"}, false, ""},
+		{"valid with optional fields", map[string]any{"category": "graph_inconsistent", "description": "entity missing", "offending_tool": "code_entity", "resource_id": "go:func:m.F"}, false, ""},
+		{"empty description", map[string]any{"category": "tool_error", "description": ""}, true, "description"},
+		{"whitespace description", map[string]any{"category": "tool_error", "description": "   "}, true, "description"},
+		{"unknown category", map[string]any{"category": "invalid_cat", "description": "desc"}, true, "category"},
+		{"empty category", map[string]any{"category": "", "description": "desc"}, true, "category"},
+		{"unknown severity", map[string]any{"category": "other", "severity": "critical", "description": "desc"}, true, "severity"},
+	}
+	log := discardLogger()
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result, err := tl.Handler(c.args, log)
+			if c.wantErr {
+				require.Error(t, err, "expected error for case %q", c.name)
+				if c.errMsg != "" {
+					require.Contains(t, err.Error(), c.errMsg)
+				}
+			} else {
+				require.NoError(t, err, "unexpected error for case %q", c.name)
+				require.NotEmpty(t, result)
+			}
+		})
+	}
+}
+
+func TestReportInternalIssue_DefaultSeverityIsError(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+	// omit severity -> should default to "error" (no error returned)
+	result, err := tl.Handler(map[string]any{
+		"category":    "workspace_broken",
+		"description": "the workspace is broken",
+	}, discardLogger())
+	require.NoError(t, err)
+	require.Contains(t, result, "severity=error")
+}
+
+func TestReportInternalIssue_IncrementMetric(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+	before := testutil.ToFloat64(obs.InternalIssueTotal.With(prometheus.Labels{"category": "other", "severity": "error"}))
+	_, err := tl.Handler(map[string]any{
+		"category":    "other",
+		"description": "test metric increment",
+	}, discardLogger())
+	require.NoError(t, err)
+	after := testutil.ToFloat64(obs.InternalIssueTotal.With(prometheus.Labels{"category": "other", "severity": "error"}))
+	require.Equal(t, before+1, after, "InternalIssueTotal must increment on handler call")
+}
+
+func TestReportInternalIssue_LogLevel(t *testing.T) {
+	tl := platformToolByName(t, "report_internal_issue")
+
+	t.Run("warn severity emits Warn record", func(t *testing.T) {
+		h := &captureHandler{}
+		log := slog.New(h)
+		_, err := tl.Handler(map[string]any{
+			"category":    "auth",
+			"severity":    "warn",
+			"description": "token about to expire",
+		}, log)
+		require.NoError(t, err)
+		recs := h.Records()
+		require.Len(t, recs, 1)
+		require.Equal(t, slog.LevelWarn, recs[0].Level)
+		var foundCat bool
+		recs[0].Attrs(func(a slog.Attr) bool {
+			if a.Key == "category" && a.Value.String() == "auth" {
+				foundCat = true
+			}
+			return true
+		})
+		require.True(t, foundCat, "log record must carry category attr")
+	})
+
+	t.Run("error severity emits Error record", func(t *testing.T) {
+		h := &captureHandler{}
+		log := slog.New(h)
+		_, err := tl.Handler(map[string]any{
+			"category":    "tool_error",
+			"severity":    "error",
+			"description": "something went wrong",
+		}, log)
+		require.NoError(t, err)
+		recs := h.Records()
+		require.Len(t, recs, 1)
+		require.Equal(t, slog.LevelError, recs[0].Level)
 	})
 }
 

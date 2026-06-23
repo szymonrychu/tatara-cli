@@ -30,6 +30,7 @@ import (
 func TestBuildTool_AllToolsMarshal(t *testing.T) {
 	all := append(AllTools(), OperatorTools()...)
 	all = append(all, ChatTools()...)
+	all = append(all, PlatformTools()...)
 	for _, tl := range all {
 		_, err := json.Marshal(buildTool(tl))
 		require.NoErrorf(t, err, "tool %s must marshal for tools/list", tl.Name)
@@ -45,21 +46,65 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	c, err := client.New(client.Config{BaseURL: "http://localhost:9999", Token: tok})
 	require.NoError(t, err)
 
-	// Must not panic; all tools register without error.
-	srv := NewServer(c, c, c, slog.Default())
+	// Must not panic; all tools register without error. Empty profile = full set.
+	srv := NewServer(c, c, c, slog.Default(), "")
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
-	// Cross-check: tool count matches registry.
-	assert.Len(t, AllTools(), 34)
+	// After Part B: AllTools is 32 (not 34). After Part C: PlatformTools adds 1.
+	// Full count: AllTools(32) + OperatorTools(20) + ChatTools(10) + PlatformTools(1) = 63.
+	assert.Len(t, AllTools(), 32, "AllTools must be 32 after Part B merges")
+}
+
+func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	ch := freshClient(t, "http://chat.invalid")
+	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
+	require.Equal(t, expected, s.ToolCount(), "empty profile must register full set (%d tools)", expected)
+	require.Equal(t, 63, s.ToolCount(), "full tool count must be 63")
+}
+
+func TestNewServer_ProfileReducesToolSet(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	ch := freshClient(t, "http://chat.invalid")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// implement has no chat, so it has fewer tools than lifecycle (which has chat)
+	sImpl := NewServer(mem, op, ch, logger, "implement")
+	sLifecycle := NewServer(mem, op, ch, logger, "lifecycle")
+	assert.Less(t, sImpl.ToolCount(), sLifecycle.ToolCount(),
+		"implement (no chat) must have fewer tools than lifecycle (with chat)")
+
+	// implement profile must be less than full set
+	sFull := NewServer(mem, op, ch, logger, "")
+	assert.Less(t, sImpl.ToolCount(), sFull.ToolCount(),
+		"implement profile must have fewer tools than full set")
+}
+
+func TestNewServer_ProfileCounts(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	ch := freshClient(t, "http://chat.invalid")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Verify each known profile registers a consistent count (non-zero, less than full).
+	fullCount := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
+		s := NewServer(mem, op, ch, logger, profile)
+		assert.Greater(t, s.ToolCount(), 0, "profile %q must register at least one tool", profile)
+		assert.LessOrEqual(t, s.ToolCount(), fullCount, "profile %q must not exceed full count", profile)
+	}
 }
 
 func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
 	ch := freshClient(t, "http://chat.invalid")
-	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools()), s.ToolCount())
+	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()), s.ToolCount())
 }
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
@@ -86,7 +131,7 @@ func TestRegister_LogsInfoOnSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger)
+		freshClient(t, backend.URL), logger, "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -126,7 +171,7 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger)
+		freshClient(t, backend.URL), logger, "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -159,7 +204,7 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 // pre-cancelled context causes Listen to return promptly.
 func TestRun_HonorsContext(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
-	srv := NewServer(mem, mem, mem, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := NewServer(mem, mem, mem, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 	// Run with a cancelled context: Listen reads from a no-op reader and should
@@ -184,7 +229,7 @@ func TestRegister_204ReturnsOKMarker(t *testing.T) {
 	defer backend.Close()
 
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -222,7 +267,7 @@ func TestRegister_LogsResourceID(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger)
+		freshClient(t, backend.URL), logger, "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -259,7 +304,7 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 	defer backend.Close()
 
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)

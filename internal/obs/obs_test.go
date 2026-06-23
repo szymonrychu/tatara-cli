@@ -75,3 +75,36 @@ func TestToolCallsTotal_IncrementAndObserve(t *testing.T) {
 		obs.TokenRefreshTotal.WithLabelValues("error").Inc()
 	})
 }
+
+func TestInternalIssueTotal_Registered(t *testing.T) {
+	ch := make(chan *prometheus.Desc, 10)
+	obs.InternalIssueTotal.Describe(ch)
+	close(ch)
+	count := 0
+	for range ch {
+		count++
+	}
+	require.Greater(t, count, 0, "InternalIssueTotal must describe at least one metric")
+	assert.True(t, isRegistered(obs.InternalIssueTotal), "tatara_mcp_internal_issue_total must be registered")
+}
+
+func TestRegisteredTools_Registered(t *testing.T) {
+	ch := make(chan *prometheus.Desc, 10)
+	obs.RegisteredTools.Describe(ch)
+	close(ch)
+	count := 0
+	for range ch {
+		count++
+	}
+	require.Greater(t, count, 0, "RegisteredTools must describe at least one metric")
+	assert.True(t, isRegistered(obs.RegisteredTools), "tatara_mcp_registered_tools must be registered")
+}
+
+func TestInternalIssueTotal_LabelCardinality(t *testing.T) {
+	require.NotPanics(t, func() {
+		obs.InternalIssueTotal.WithLabelValues("tool_error", "error").Inc()
+		obs.InternalIssueTotal.WithLabelValues("auth", "warn").Inc()
+		obs.RegisteredTools.WithLabelValues("brainstorm").Set(42)
+		obs.RegisteredTools.WithLabelValues("all").Set(63)
+	})
+}

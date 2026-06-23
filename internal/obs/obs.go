@@ -38,8 +38,29 @@ var (
 		Name: "tatara_client_creds_mint_total",
 		Help: "Total client_credentials token mint attempts, partitioned by result.",
 	}, []string{"result"})
+
+	// InternalIssueTotal counts report_internal_issue calls partitioned by
+	// category and severity. Labels: {category, severity}.
+	InternalIssueTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "tatara_mcp_internal_issue_total",
+		Help: "Total report_internal_issue calls, partitioned by category and severity.",
+	}, []string{"category", "severity"})
+
+	// RegisteredTools is a gauge set once at startup to the number of MCP tools
+	// registered, labelled by profile. Labels: {profile}.
+	RegisteredTools = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tatara_mcp_registered_tools",
+		Help: "Number of MCP tools registered at startup, partitioned by profile.",
+	}, []string{"profile"})
 )
 
 func init() {
-	prometheus.MustRegister(ToolCallsTotal, ToolCallDurationMs, TokenRefreshTotal, ClientCredsMintTotal)
+	prometheus.MustRegister(
+		ToolCallsTotal,
+		ToolCallDurationMs,
+		TokenRefreshTotal,
+		ClientCredsMintTotal,
+		InternalIssueTotal,
+		RegisteredTools,
+	)
 }
