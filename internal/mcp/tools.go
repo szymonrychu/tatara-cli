@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
+	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // Target identifies which backend client a Tool is dispatched against.
@@ -30,9 +32,16 @@ type Tool struct {
 	Schema      json.RawMessage
 	Target      Target
 	Build       func(args map[string]any) (method, path string, body any, err error)
+	// Handler, when set, is called directly by register() instead of dispatching
+	// an HTTP round-trip via clientFor/Invoke. Used for pure-local tools (e.g.
+	// report_internal_issue) that execute in the cli process and need no backend.
+	// log is the server's injected structured logger (same one used by register).
+	Handler func(args map[string]any, log *slog.Logger) (string, error)
 }
 
-// AllTools returns the 34-entry tool registry mapping tatara-memory REST endpoints.
+// AllTools returns the 32-entry tool registry mapping tatara-memory REST endpoints.
+// (13 memory tools + 19 code-graph tools; code_communities and code_hyperedges
+// each absorb their single-item counterpart via an optional discriminator arg.)
 func AllTools() []Tool {
 	return []Tool{
 		{
@@ -220,18 +229,43 @@ func AllTools() []Tool {
 		{Name: "code_related", Description: "Semantic neighbors of an entity over semantic edges (conceptually_related_to, semantically_similar_to, rationale_for, shares_data_with, cites), filtered by relation and min confidence.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"relations":{"type":"string"},"min_confidence":{"type":"number"},"repo":{"type":"string"}},"required":["id","repo"]}`),
 			Build:  codeGet("/code-graph/related", []string{"id", "repo"}, []string{"relations", "min_confidence"})},
-		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"entity":{"type":"string"},"repo":{"type":"string"}},"required":["repo"]}`),
-			Build:  codeGet("/code-graph/hyperedges", []string{"repo"}, []string{"entity"})},
-		{Name: "code_hyperedge", Description: "Get a single hyperedge by id with its members.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"repo":{"type":"string"}},"required":["id","repo"]}`),
-			Build:  codeGet("/code-graph/hyperedge", []string{"id", "repo"}, nil)},
-		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), scoped to repo.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"}},"required":["repo"]}`),
-			Build:  codeGet("/code-graph/communities", []string{"repo"}, nil)},
-		{Name: "code_community", Description: "List the member entities of a specific community.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer"}},"required":["repo","community"]}`),
-			Build:  codeGet("/code-graph/community", []string{"repo", "community"}, nil)},
+		{Name: "code_hyperedges", Description: "List n-ary hyperedges (group relations) in the code graph, optionally scoped to a member entity. Supply id to fetch that single hyperedge with its members; id takes precedence over entity filter.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"entity":{"type":"string","description":"Optional entity filter when listing; ignored when id is set."},"id":{"type":"string","description":"When set, fetch this specific hyperedge by id; takes precedence over entity."}},"required":["repo"]}`),
+			Build: func(a map[string]any) (string, string, any, error) {
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				q := url.Values{}
+				q.Set("repo", repo)
+				if id := argString(a, "id"); id != "" {
+					// id wins: fetch single hyperedge
+					q.Set("id", id)
+					return http.MethodGet, "/code-graph/hyperedge?" + q.Encode(), nil, nil
+				}
+				// list mode: entity is optional filter
+				if entity := argString(a, "entity"); entity != "" {
+					q.Set("entity", entity)
+				}
+				return http.MethodGet, "/code-graph/hyperedges?" + q.Encode(), nil, nil
+			}},
+		{Name: "code_communities", Description: "List detected communities in the code graph (community, label, size, cohesion), scoped to repo. Supply community (int) to list the member entities of that specific community.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"community":{"type":"integer","description":"When set, list members of this specific community; omit to list all communities."}},"required":["repo"]}`),
+			Build: func(a map[string]any) (string, string, any, error) {
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				q := url.Values{}
+				q.Set("repo", repo)
+				if community := argString(a, "community"); community != "" {
+					// community discriminator set: list members of that community
+					q.Set("community", community)
+					return http.MethodGet, "/code-graph/community?" + q.Encode(), nil, nil
+				}
+				// omitted: list all communities
+				return http.MethodGet, "/code-graph/communities?" + q.Encode(), nil, nil
+			}},
 		{Name: "code_bridges", Description: "High-betweenness entities that connect more than one community (graph bridges), ranked, scoped to repo.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"limit":{"type":"integer"}},"required":["repo"]}`),
 			Build:  codeGet("/code-graph/bridges", []string{"repo"}, []string{"limit"})},
@@ -755,6 +789,86 @@ func ChatTools() []Tool {
 				}
 				return http.MethodGet, path, nil, nil
 			}),
+	}
+}
+
+// validCategories is the set of allowed category enum values for report_internal_issue.
+var validCategories = map[string]bool{
+	"tool_error":              true,
+	"directive_contradiction": true,
+	"workspace_broken":        true,
+	"memory_inconsistent":     true,
+	"graph_inconsistent":      true,
+	"auth":                    true,
+	"other":                   true,
+}
+
+// validSeverities is the set of allowed severity enum values for report_internal_issue.
+var validSeverities = map[string]bool{
+	"warn":  true,
+	"error": true,
+}
+
+// PlatformTools returns cross-cutting platform tools (no backend HTTP round-trip).
+// These tools use Tool.Handler and are included in every profile via alwaysOn.
+func PlatformTools() []Tool {
+	return []Tool{
+		{
+			Name:        "report_internal_issue",
+			Description: "Report a platform-internal issue (tool error, directive contradiction, broken workspace, memory/graph inconsistency, auth problem, or other). Emits a structured ERROR log and increments a metric. Does NOT create a durable GitHub issue. Use this when you detect a systematic problem the platform team should know about.",
+			Schema:      json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["tool_error","directive_contradiction","workspace_broken","memory_inconsistent","graph_inconsistent","auth","other"],"description":"Issue category."},"severity":{"type":"string","enum":["warn","error"],"description":"Severity level; defaults to error."},"description":{"type":"string","description":"Human-readable description of the issue. Required and must be non-empty."},"offending_tool":{"type":"string","description":"MCP tool name that triggered the issue, if applicable."},"resource_id":{"type":"string","description":"Resource identifier (task, repo, entity ID) related to the issue, if applicable."}},"required":["category","description"],"additionalProperties":false}`),
+			// No Target or Build; Handler is set below.
+			Handler: func(args map[string]any, log *slog.Logger) (string, error) {
+				category, _ := args["category"].(string)
+				if !validCategories[category] {
+					return "", fmt.Errorf("category required: must be one of tool_error, directive_contradiction, workspace_broken, memory_inconsistent, graph_inconsistent, auth, other")
+				}
+				severity, _ := args["severity"].(string)
+				if severity == "" {
+					severity = "error"
+				}
+				if !validSeverities[severity] {
+					return "", fmt.Errorf("severity must be one of warn, error")
+				}
+				description, _ := args["description"].(string)
+				if strings.TrimSpace(description) == "" {
+					return "", fmt.Errorf("description required (non-empty)")
+				}
+
+				offendingTool, _ := args["offending_tool"].(string)
+				resourceID, _ := args["resource_id"].(string)
+				project := os.Getenv("TATARA_PROJECT")
+				task := os.Getenv("TATARA_TASK")
+
+				logAttrs := []any{
+					"category", category,
+					"severity", severity,
+					"description", description,
+				}
+				if offendingTool != "" {
+					logAttrs = append(logAttrs, "offending_tool", offendingTool)
+				}
+				if resourceID != "" {
+					logAttrs = append(logAttrs, "resource_id", resourceID)
+				}
+				if project != "" {
+					logAttrs = append(logAttrs, "project", project)
+				}
+				if task != "" {
+					logAttrs = append(logAttrs, "task", task)
+				}
+
+				// Log at the appropriate level via the server's injected logger; metric always increments.
+				if severity == "warn" {
+					log.Warn("internal issue reported", logAttrs...)
+				} else {
+					log.Error("internal issue reported", logAttrs...)
+				}
+				obs.InternalIssueTotal.WithLabelValues(category, severity).Inc()
+
+				return fmt.Sprintf("internal issue reported: category=%s severity=%s", category, severity), nil
+			},
+		},
 	}
 }
 

@@ -53,7 +53,7 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	defer chat.Close()
 
 	srv := NewServer(freshClient(t, memory.URL), freshClient(t, operator.URL),
-		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -73,7 +73,7 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	// returned an error (and zero tools) under the 0.4.x marshalling bug.
 	listRes, err := cli.ListTools(ctx, mcplib.ListToolsRequest{})
 	require.NoError(t, err)
-	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools()))
+	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()))
 
 	exposed := map[string]bool{}
 	for _, tl := range listRes.Tools {
