@@ -151,6 +151,14 @@ func TestDeclineImplementation_Build(t *testing.T) {
 	})
 }
 
+func TestDeclineImplementation_RejectsWhitespaceReason(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	_, _, _, err := operatorToolByName(t, "decline_implementation").Build(map[string]any{
+		"reason": "   ",
+	})
+	require.Error(t, err)
+}
+
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
 	for _, tl := range OperatorTools() {
 		require.Equal(t, TargetOperator, tl.Target)

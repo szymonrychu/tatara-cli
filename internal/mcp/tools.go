@@ -529,8 +529,8 @@ func OperatorTools() []Tool {
 				if tk == "" {
 					return "", "", nil, fmt.Errorf("task required")
 				}
-				if argString(a, "reason") == "" {
-					return "", "", nil, fmt.Errorf("reason required")
+				if strings.TrimSpace(argString(a, "reason")) == "" {
+					return "", "", nil, fmt.Errorf("reason required (non-empty): explain why this issue is not being implemented")
 				}
 				body := map[string]any{
 					"action": "declined",
