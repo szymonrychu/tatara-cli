@@ -198,6 +198,19 @@ func TestAlreadyDone_Build(t *testing.T) {
 	})
 }
 
+func TestAllToolsIncludeAlreadyDone(t *testing.T) {
+	// The MCP server registers both AllTools() and OperatorTools().
+	// already_done lives in OperatorTools(); confirm it is served tokenless.
+	found := false
+	for _, tl := range OperatorTools() {
+		if tl.Name == "already_done" {
+			found = true
+			require.Equal(t, TargetOperator, tl.Target)
+		}
+	}
+	require.True(t, found, "already_done must be in OperatorTools() so tatara mcp serves it tokenless")
+}
+
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
 	for _, tl := range OperatorTools() {
 		require.Equal(t, TargetOperator, tl.Target)
