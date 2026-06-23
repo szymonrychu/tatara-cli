@@ -114,7 +114,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 19)
+	require.Len(t, OperatorTools(), 20)
 }
 
 func TestDeclineImplementation_Build(t *testing.T) {
@@ -157,6 +157,45 @@ func TestDeclineImplementation_RejectsWhitespaceReason(t *testing.T) {
 		"reason": "   ",
 	})
 	require.Error(t, err)
+}
+
+func TestAlreadyDone_Build(t *testing.T) {
+	t.Run("explicit task + reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		m, p, body, err := operatorToolByName(t, "already_done").Build(map[string]any{
+			"task":   "t1",
+			"reason": "the change is already present on the shared branch",
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.MethodPost, m)
+		require.Equal(t, "/tasks/t1/implement-outcome", p)
+		bm := body.(map[string]any)
+		require.Equal(t, "already_done", bm["action"])
+		require.Equal(t, "the change is already present on the shared branch", bm["reason"])
+	})
+	t.Run("env fallback", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "env-task")
+		_, p, _, err := operatorToolByName(t, "already_done").Build(map[string]any{
+			"reason": "already committed",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "/tasks/env-task/implement-outcome", p)
+	})
+	t.Run("require reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "already_done").Build(map[string]any{})
+		require.Error(t, err)
+	})
+	t.Run("reject whitespace reason", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "t1")
+		_, _, _, err := operatorToolByName(t, "already_done").Build(map[string]any{"reason": "  "})
+		require.Error(t, err)
+	})
+	t.Run("require task", func(t *testing.T) {
+		t.Setenv("TATARA_TASK", "")
+		_, _, _, err := operatorToolByName(t, "already_done").Build(map[string]any{"reason": "x"})
+		require.Error(t, err)
+	})
 }
 
 func TestOperatorTools_TargetIsOperator(t *testing.T) {
@@ -1312,7 +1351,7 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 }
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
-	require.Len(t, OperatorTools(), 19)
+	require.Len(t, OperatorTools(), 20)
 }
 
 // Finding r3-1: bulk_create_memories schema must expose repo, reconcile_files, and

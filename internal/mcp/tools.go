@@ -522,7 +522,7 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
 			}),
-		op("decline_implementation", "Declare that you will NOT implement this issue. Call this when, after investigation, you have determined the issue should not or need not be implemented. Posts the reason as a comment on the issue and parks the task. A silent finish with no PR and no decline_implementation call is NOT allowed.",
+		op("decline_implementation", "Declare that you REFUSE to implement this issue (it should not be done: out of scope, wrong approach, blocked, harmful). Call this after investigation when no code change SHOULD be made. Posts the reason as a comment on the issue and parks the task. If instead the change is ALREADY PRESENT and nothing is needed, call already_done. A silent finish with no PR and no decline_implementation/already_done call is NOT allowed.",
 			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"Why you are NOT implementing this issue (what you considered, why it should not be done / is already done / is wrong). Posted to the issue."}},"required":["reason"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
@@ -534,6 +534,22 @@ func OperatorTools() []Tool {
 				}
 				body := map[string]any{
 					"action": "declined",
+					"reason": a["reason"],
+				}
+				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/implement-outcome", body, nil
+			}),
+		op("already_done", "Declare that the requested change is ALREADY PRESENT and no new code is needed (e.g. another task already committed the fix on the shared branch, so this run produced no diff). Call this when, after re-reading the issue and the repository, you confirm the fix already exists. Posts the reason as a comment on the issue and parks the task. This is NOT a refusal - use decline_implementation if you are refusing to implement. A silent finish with no PR and no already_done/decline_implementation call is NOT allowed.",
+			`{"type":"object","properties":{"task":{"type":"string"},"reason":{"type":"string","description":"What already-present change satisfies the issue (where the fix already lives, e.g. the commit/branch/PR), so no new code was produced. Posted to the issue."}},"required":["reason"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				tk := argOrEnv(a, "task", "TATARA_TASK")
+				if tk == "" {
+					return "", "", nil, fmt.Errorf("task required")
+				}
+				if strings.TrimSpace(argString(a, "reason")) == "" {
+					return "", "", nil, fmt.Errorf("reason required (non-empty): explain what already-present change satisfies this issue")
+				}
+				body := map[string]any{
+					"action": "already_done",
 					"reason": a["reason"],
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/implement-outcome", body, nil
