@@ -702,6 +702,9 @@ func OperatorTools() []Tool {
 				if v, ok := a["labels"]; ok {
 					body["labels"] = v
 				}
+				if len(body) == 0 {
+					return "", "", nil, fmt.Errorf("edit_issue requires at least one of title, body, labels")
+				}
 				path := "/projects/" + url.PathEscape(p) + "/issues/" + url.PathEscape(repo) + "/" + numStr
 				return http.MethodPatch, path, body, nil
 			}),

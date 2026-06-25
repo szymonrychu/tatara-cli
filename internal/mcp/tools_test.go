@@ -2076,6 +2076,14 @@ func TestTool_EditIssue_RequiresNumber(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestTool_EditIssue_RequiresAtLeastOneField(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "edit_issue").Build(map[string]any{
+		"repo": "szymonrychu/tatara-cli", "number": float64(7),
+	})
+	require.Error(t, err, "edit_issue with no title/body/labels must fail fast, not send an empty PATCH")
+}
+
 func TestTool_CreateIssue_DirectCreate(t *testing.T) {
 	t.Setenv("TATARA_PROJECT", "myproj")
 	var gotMethod, gotPath string
