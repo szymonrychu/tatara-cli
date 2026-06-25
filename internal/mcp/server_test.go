@@ -52,7 +52,8 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	assert.NotNil(t, srv.srv)
 
 	// After Part B: AllTools is 32 (not 34). After Part C: PlatformTools adds 1.
-	// Full count: AllTools(32) + OperatorTools(20) + ChatTools(10) + PlatformTools(1) = 63.
+	// After refine agent (E2): OperatorTools grows to 25.
+	// Full count: AllTools(32) + OperatorTools(25) + ChatTools(10) + PlatformTools(1) = 68.
 	assert.Len(t, AllTools(), 32, "AllTools must be 32 after Part B merges")
 }
 
@@ -63,7 +64,7 @@ func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
 	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
 	require.Equal(t, expected, s.ToolCount(), "empty profile must register full set (%d tools)", expected)
-	require.Equal(t, 63, s.ToolCount(), "full tool count must be 63")
+	require.Equal(t, 68, s.ToolCount(), "full tool count must be 68")
 }
 
 func TestNewServer_ProfileReducesToolSet(t *testing.T) {
@@ -109,7 +110,7 @@ func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
 	tools := OperatorTools()
-	require.Len(t, tools, 20)
+	require.Len(t, tools, 25)
 	for _, tl := range tools {
 		var v any
 		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "operator tool %q has invalid JSON schema", tl.Name)

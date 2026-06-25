@@ -153,7 +153,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 20)
+	require.Len(t, OperatorTools(), 25)
 }
 
 func TestDeclineImplementation_Build(t *testing.T) {
@@ -1470,7 +1470,7 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 }
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
-	require.Len(t, OperatorTools(), 20)
+	require.Len(t, OperatorTools(), 25)
 }
 
 // Finding r3-1: bulk_create_memories schema must expose repo, reconcile_files, and
@@ -1944,6 +1944,198 @@ func TestReportInternalIssue_LogLevel(t *testing.T) {
 		require.Len(t, recs, 1)
 		require.Equal(t, slog.LevelError, recs[0].Level)
 	})
+}
+
+// --- Refine agent tool tests (E2) ---
+
+func TestTool_ListIssues_BuildPath(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	m, p, _, err := operatorToolByName(t, "list_issues").Build(map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodGet, m)
+	require.Contains(t, p, "/projects/myproj/issues")
+}
+
+func TestTool_ListIssues_StateAndClosedSinceDays(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, p, _, err := operatorToolByName(t, "list_issues").Build(map[string]any{
+		"state": "all", "closedSinceDays": float64(14),
+	})
+	require.NoError(t, err)
+	require.Contains(t, p, "state=all")
+	require.Contains(t, p, "closedSinceDays=14")
+}
+
+func TestTool_ListIssues_RequiresProject(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "")
+	_, _, _, err := operatorToolByName(t, "list_issues").Build(map[string]any{})
+	require.Error(t, err)
+}
+
+func TestTool_ListCommits_BuildPath(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	m, p, _, err := operatorToolByName(t, "list_commits").Build(map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodGet, m)
+	require.Contains(t, p, "/projects/myproj/commits")
+}
+
+func TestTool_ListCommits_SinceDays(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, p, _, err := operatorToolByName(t, "list_commits").Build(map[string]any{"sinceDays": float64(7)})
+	require.NoError(t, err)
+	require.Contains(t, p, "sinceDays=7")
+}
+
+func TestTool_CloseIssue_CallsCloseEndpoint(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := operatorToolByName(t, "close_issue")
+	_, err := Invoke(context.Background(), c, tool, map[string]any{
+		"repo": "szymonrychu/tatara-cli", "number": float64(42), "comment": "duplicate of #7",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, gotMethod)
+	// net/http URL-decodes r.URL.Path; use RawPath to check the encoded form.
+	require.Contains(t, gotPath, "42/close")
+	require.Contains(t, gotPath, "myproj")
+	require.Equal(t, "duplicate of #7", gotBody["comment"])
+}
+
+func TestTool_CloseIssue_RequiresComment(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "close_issue").Build(map[string]any{
+		"repo": "r", "number": float64(1),
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CloseIssue_RequiresRepo(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "close_issue").Build(map[string]any{
+		"number": float64(1), "comment": "c",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CloseIssue_RequiresNumber(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "close_issue").Build(map[string]any{
+		"repo": "r", "comment": "c",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_EditIssue_PatchesOnlyProvided(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := operatorToolByName(t, "edit_issue")
+	_, err := Invoke(context.Background(), c, tool, map[string]any{
+		"repo": "szymonrychu/tatara-cli", "number": float64(7), "title": "narrowed title",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPatch, gotMethod)
+	require.Contains(t, gotPath, "/7")
+	require.Contains(t, gotPath, "myproj")
+	require.Equal(t, "narrowed title", gotBody["title"])
+	_, hasBody := gotBody["body"]
+	require.False(t, hasBody, "body must NOT be sent when not provided")
+}
+
+func TestTool_EditIssue_RequiresRepo(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "edit_issue").Build(map[string]any{
+		"number": float64(1), "title": "t",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_EditIssue_RequiresNumber(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "edit_issue").Build(map[string]any{
+		"repo": "r", "title": "t",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CreateIssue_DirectCreate(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":99,"title":"child issue"}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := operatorToolByName(t, "create_issue")
+	_, err := Invoke(context.Background(), c, tool, map[string]any{
+		"repo": "szymonrychu/tatara-cli", "title": "child issue", "body": "split from #5",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, gotMethod)
+	require.Contains(t, gotPath, "myproj")
+	require.Contains(t, gotPath, "tatara-cli")
+	require.Equal(t, "child issue", gotBody["title"])
+	require.Equal(t, "split from #5", gotBody["body"])
+}
+
+func TestTool_CreateIssue_RequiresRepo(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "create_issue").Build(map[string]any{
+		"title": "t", "body": "b",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CreateIssue_RequiresTitle(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "create_issue").Build(map[string]any{
+		"repo": "r", "body": "b",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CreateIssue_RequiresBody(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, _, err := operatorToolByName(t, "create_issue").Build(map[string]any{
+		"repo": "r", "title": "t",
+	})
+	require.Error(t, err)
+}
+
+func TestTool_CreateIssue_WithLabels(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	_, _, body, err := operatorToolByName(t, "create_issue").Build(map[string]any{
+		"repo": "r", "title": "t", "body": "b", "labels": []any{"bug", "refine"},
+	})
+	require.NoError(t, err)
+	m := body.(map[string]any)
+	require.Equal(t, []any{"bug", "refine"}, m["labels"])
+}
+
+func TestAllOperatorTools_CountAfterRefine(t *testing.T) {
+	require.Len(t, OperatorTools(), 25)
 }
 
 func TestProposeIssue_SystemicIDForwarded(t *testing.T) {
