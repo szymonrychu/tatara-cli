@@ -295,6 +295,17 @@ func codeGet(path string, required []string, optional []string) func(map[string]
 // argString coerces string or JSON number args to a string.
 // JSON-decoded numbers always arrive as float64 (never int); the float64 branch
 // handles both integer-valued and fractional numbers.
+// repoSlugPath turns an "owner/repo" slug into two path-escaped segments
+// "owner/repo" (slash preserved), matching the operator's {owner}/{repo} routes.
+// A bare repo (no slash) is escaped as a single segment.
+func repoSlugPath(slug string) string {
+	parts := strings.SplitN(slug, "/", 2)
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return strings.Join(parts, "/")
+}
+
 func argString(a map[string]any, k string) string {
 	switch v := a[k].(type) {
 	case string:
@@ -673,7 +684,7 @@ func OperatorTools() []Tool {
 					return "", "", nil, fmt.Errorf("comment required (non-empty): every close must explain itself")
 				}
 				body := map[string]any{"comment": a["comment"]}
-				path := "/projects/" + url.PathEscape(p) + "/issues/" + url.PathEscape(repo) + "/" + numStr + "/close"
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr + "/close"
 				return http.MethodPost, path, body, nil
 			}),
 		op("edit_issue", "Edit an existing issue: patch title, body, and/or labels (only supplied fields are sent). Use to tighten scope or correct labels. project defaults to TATARA_PROJECT env when omitted.",
@@ -705,7 +716,7 @@ func OperatorTools() []Tool {
 				if len(body) == 0 {
 					return "", "", nil, fmt.Errorf("edit_issue requires at least one of title, body, labels")
 				}
-				path := "/projects/" + url.PathEscape(p) + "/issues/" + url.PathEscape(repo) + "/" + numStr
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr
 				return http.MethodPatch, path, body, nil
 			}),
 		op("create_issue", "Create a new issue directly in a project repository (for splits and followups). The operator creates it under the bot identity without the proposal/approval flow. project defaults to TATARA_PROJECT env when omitted.",
@@ -732,7 +743,7 @@ func OperatorTools() []Tool {
 				if v, ok := a["labels"]; ok {
 					body["labels"] = v
 				}
-				path := "/projects/" + url.PathEscape(p) + "/issues/" + url.PathEscape(repo)
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo)
 				return http.MethodPost, path, body, nil
 			}),
 		op("comment_on_issue", "Post a comment on an EXISTING open issue (identified by repo + number) when your idea duplicates, extends, or is a sub-aspect of it - instead of opening a duplicate issue. The operator posts it under the bot identity. Use propose_issue ONLY for genuinely novel, standalone problems.",
