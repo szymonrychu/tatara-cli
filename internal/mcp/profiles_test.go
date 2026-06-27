@@ -246,6 +246,7 @@ func TestKindToProfile(t *testing.T) {
 		{"incident", "incident"},
 		{"selfImprove", "selfImprove"},
 		{"healthCheck", "brainstorm"}, // healthCheck shares Kind=brainstorm
+		{"refine", "refine"},
 		{"unknown", ""},
 		{"", ""},
 	}
@@ -255,4 +256,39 @@ func TestKindToProfile(t *testing.T) {
 			assert.Equal(t, c.profile, got, "kind=%q", c.kind)
 		})
 	}
+}
+
+func TestProfile_Refine(t *testing.T) {
+	if toolProfileForKind("refine") != "refine" {
+		t.Fatal("refine kind must map to refine profile")
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("refine", log)
+	require.NotNil(t, result, "refine profile must resolve")
+
+	must := []string{
+		"list_issues", "list_commits", "close_issue", "edit_issue", "create_issue",
+		"comment_on_issue", "task_list", "task_get", "repo_list", "report_internal_issue",
+	}
+	for _, m := range must {
+		assert.True(t, result[m], "refine profile missing %q", m)
+	}
+	for _, no := range []string{"propose_issue", "task_update", "subtask_create"} {
+		assert.False(t, result[no], "refine profile must NOT grant %q", no)
+	}
+}
+
+func TestRefineProfile_HasMemoryAndCodeGraph(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("refine", log)
+	require.NotNil(t, result)
+	assert.True(t, result["query"], "refine profile must include memory tools")
+	assert.True(t, result["code_search"], "refine profile must include code-graph tools")
+}
+
+func TestRefineProfile_NoChat(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("refine", log)
+	require.NotNil(t, result)
+	assert.False(t, result["chat_create_room"], "refine profile must NOT include chat tools")
 }

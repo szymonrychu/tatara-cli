@@ -21,6 +21,8 @@ func toolProfileForKind(kind string) string {
 		return "incident"
 	case "selfImprove":
 		return "selfImprove"
+	case "refine":
+		return "refine"
 	default:
 		return ""
 	}
@@ -95,6 +97,15 @@ type profileSpec struct {
 }
 
 var profiles = map[string]profileSpec{
+	"refine": {
+		// no chat: refine is a headless batch operation.
+		operator: []string{
+			"task_list",
+			"list_issues", "list_commits",
+			"close_issue", "edit_issue", "create_issue",
+			"comment_on_issue",
+		},
+	},
 	"brainstorm": {
 		chat: true,
 		operator: []string{

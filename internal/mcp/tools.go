@@ -295,6 +295,17 @@ func codeGet(path string, required []string, optional []string) func(map[string]
 // argString coerces string or JSON number args to a string.
 // JSON-decoded numbers always arrive as float64 (never int); the float64 branch
 // handles both integer-valued and fractional numbers.
+// repoSlugPath turns an "owner/repo" slug into two path-escaped segments
+// "owner/repo" (slash preserved), matching the operator's {owner}/{repo} routes.
+// A bare repo (no slash) is escaped as a single segment.
+func repoSlugPath(slug string) string {
+	parts := strings.SplitN(slug, "/", 2)
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return strings.Join(parts, "/")
+}
+
 func argString(a map[string]any, k string) string {
 	switch v := a[k].(type) {
 	case string:
@@ -616,6 +627,124 @@ func OperatorTools() []Tool {
 				}
 				body := map[string]any{"body": a["body"]}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/comment", body, nil
+			}),
+		op("list_issues", "List open and optionally recently-closed issues across all repositories in the current project. Use state=all to include closed issues (filtered by closedSinceDays, default 30). PRs are excluded. project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"state":{"type":"string","enum":["open","all"],"description":"open (default) for open issues only; all to also include recently-closed."},"closedSinceDays":{"type":"integer","description":"How many days back to include closed issues when state=all. Defaults to 30."}}}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				q := url.Values{}
+				if v := argString(a, "state"); v != "" {
+					q.Set("state", v)
+				}
+				if v := argString(a, "closedSinceDays"); v != "" {
+					q.Set("closedSinceDays", v)
+				}
+				path := "/projects/" + url.PathEscape(p) + "/issues"
+				if len(q) > 0 {
+					path += "?" + q.Encode()
+				}
+				return http.MethodGet, path, nil, nil
+			}),
+		op("list_commits", "List recent default-branch commits across all repositories in the current project. Use sinceDays to bound the lookback (default 30). project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"sinceDays":{"type":"integer","description":"How many days back to include commits. Defaults to 30."}}}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				q := url.Values{}
+				if v := argString(a, "sinceDays"); v != "" {
+					q.Set("sinceDays", v)
+				}
+				path := "/projects/" + url.PathEscape(p) + "/commits"
+				if len(q) > 0 {
+					path += "?" + q.Encode()
+				}
+				return http.MethodGet, path, nil, nil
+			}),
+		op("close_issue", "Close an issue in a project repository with an explanatory comment (required). Every close must cite the reason (duplicate of #N, already implemented in commit SHA, etc.). project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string","description":"Repository slug, e.g. szymonrychu/tatara-cli."},"number":{"type":"integer","description":"Issue number."},"comment":{"type":"string","description":"Reason for closing (required). Every close must explain itself."}},"required":["repo","number","comment"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				numStr := argString(a, "number")
+				if numStr == "" {
+					return "", "", nil, fmt.Errorf("number required")
+				}
+				if strings.TrimSpace(argString(a, "comment")) == "" {
+					return "", "", nil, fmt.Errorf("comment required (non-empty): every close must explain itself")
+				}
+				body := map[string]any{"comment": a["comment"]}
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr + "/close"
+				return http.MethodPost, path, body, nil
+			}),
+		op("edit_issue", "Edit an existing issue: patch title, body, and/or labels (only supplied fields are sent). Use to tighten scope or correct labels. project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string","description":"Repository slug, e.g. szymonrychu/tatara-cli."},"number":{"type":"integer","description":"Issue number."},"title":{"type":"string","description":"New title (omit to leave unchanged)."},"body":{"type":"string","description":"New body (omit to leave unchanged)."},"labels":{"type":"array","items":{"type":"string"},"description":"Replacement label set (omit to leave labels unchanged)."}},"required":["repo","number"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				numStr := argString(a, "number")
+				if numStr == "" {
+					return "", "", nil, fmt.Errorf("number required")
+				}
+				// Only include fields the caller provided (PATCH semantics).
+				body := map[string]any{}
+				if v, ok := a["title"]; ok {
+					body["title"] = v
+				}
+				if v, ok := a["body"]; ok {
+					body["body"] = v
+				}
+				if v, ok := a["labels"]; ok {
+					body["labels"] = v
+				}
+				if len(body) == 0 {
+					return "", "", nil, fmt.Errorf("edit_issue requires at least one of title, body, labels")
+				}
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr
+				return http.MethodPatch, path, body, nil
+			}),
+		op("create_issue", "Create a new issue directly in a project repository (for splits and followups). The operator creates it under the bot identity without the proposal/approval flow. project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string","description":"Repository slug, e.g. szymonrychu/tatara-cli."},"title":{"type":"string"},"body":{"type":"string","description":"Body must link the originating issue or commit and state why this issue was filed."},"labels":{"type":"array","items":{"type":"string"}}},"required":["repo","title","body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				if argString(a, "title") == "" {
+					return "", "", nil, fmt.Errorf("title required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{
+					"title": a["title"],
+					"body":  a["body"],
+				}
+				if v, ok := a["labels"]; ok {
+					body["labels"] = v
+				}
+				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo)
+				return http.MethodPost, path, body, nil
 			}),
 		op("comment_on_issue", "Post a comment on an EXISTING open issue (identified by repo + number) when your idea duplicates, extends, or is a sub-aspect of it - instead of opening a duplicate issue. The operator posts it under the bot identity. Use propose_issue ONLY for genuinely novel, standalone problems.",
 			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"},"number":{"type":"integer"},"body":{"type":"string"}},"required":["repo","number","body"]}`,
