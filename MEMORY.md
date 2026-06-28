@@ -23,6 +23,8 @@ Format: `YYYY-MM-DD - decision/finding`
 
 2026-06-13 - change_summary tool POSTed snake_case body keys (pr_title, pr_body, delivered_scope, remaining_scope) but the operator changeSummaryReq json tags are camelCase and decodeJSON sets DisallowUnknownFields, so those fields were silently rejected (lifecycle fell back to default MR title/body). Fixed: tool args stay snake_case (agent-facing), Build maps them to camelCase body keys. Single-word tools (issue_outcome/pr_outcome) were unaffected since their keys collide. Added most_problematic (change_summary) + plan (issue_outcome) for issue#6 lifecycle notifications.
 
+2026-06-28 - semver push-CD (spec 2026-06-28): change_summary gains REQUIRED enum change_significance (major|minor|patch, snake arg -> camel wire key changeSignificance) - the operator derives the PR's semver:* label + auto-merge gate from it. Vocab is major (not "breaking"). Added .github/workflows/release.yml: push-to-main, gated on lint/test/build, then cd-release@tatara-helmfile tag (cuts cli vX.Y.Z off the merged PR's semver:* label), build.sh re-publishes image at :vX.Y.Z (git describe resolves the fresh tag), then cd-release bump rewrites the WRAPPER's 3 TATARA_CLI_VERSION pins (Dockerfile ARG + Makefile + .github/ci/build.sh) lockstep in one PR. Push trigger (not workflow_run) so the action sees the merge commit as $GITHUB_SHA. Seed tag floor = existing v0.4.0 (git tag --sort=-v:refname picks it; no new tag cut here). Needs secrets.TATARA_CD_TOKEN (bot PAT).
+
 ## Dead-ends / things tried that did not work
 2026-06-13 - gosec G703-G705 taint-analysis rules excluded in .golangci.yml - flag pre-existing internal/auth/clientcreds.go (already nolint-justified).
 

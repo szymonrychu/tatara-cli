@@ -504,8 +504,8 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
-		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, optional remaining scope, and optionally what was most problematic.",
-			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"remaining_scope":{"type":"string"},"most_problematic":{"type":"string","description":"What was most problematic or surprising during implementation (gotchas, dead-ends, tricky integration points). Surfaced in the MR body and recorded in docs."}},"required":["pr_title","pr_body","delivered_scope"]}`,
+		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, change significance (semver level), optional remaining scope, and optionally what was most problematic.",
+			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"change_significance":{"type":"string","enum":["major","minor","patch"],"description":"major=backward-incompatible (API/CRD break, removed/renamed public surface); minor=backward-compatible new functionality; patch=fix or anything else"},"remaining_scope":{"type":"string"},"most_problematic":{"type":"string","description":"What was most problematic or surprising during implementation (gotchas, dead-ends, tricky integration points). Surfaced in the MR body and recorded in docs."}},"required":["pr_title","pr_body","delivered_scope","change_significance"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -520,12 +520,20 @@ func OperatorTools() []Tool {
 				if argString(a, "delivered_scope") == "" {
 					return "", "", nil, fmt.Errorf("delivered_scope required")
 				}
+				switch argString(a, "change_significance") {
+				case "":
+					return "", "", nil, fmt.Errorf("change_significance required: one of major|minor|patch")
+				case "major", "minor", "patch":
+				default:
+					return "", "", nil, fmt.Errorf("change_significance must be one of major|minor|patch")
+				}
 				// Operator REST DTOs are camelCase; map the snake_case tool args to
 				// the changeSummaryReq json keys (it decodes with DisallowUnknownFields).
 				body := map[string]any{
-					"prTitle":        a["pr_title"],
-					"prBody":         a["pr_body"],
-					"deliveredScope": a["delivered_scope"],
+					"prTitle":            a["pr_title"],
+					"prBody":             a["pr_body"],
+					"deliveredScope":     a["delivered_scope"],
+					"changeSignificance": a["change_significance"],
 				}
 				if v, ok := a["remaining_scope"]; ok {
 					body["remainingScope"] = v
