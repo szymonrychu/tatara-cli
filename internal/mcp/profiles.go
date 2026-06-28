@@ -98,11 +98,13 @@ type profileSpec struct {
 
 var profiles = map[string]profileSpec{
 	"refine": {
-		// no chat: refine is a headless batch operation.
+		// no chat: refine is a headless backlog groomer (close dups/done, edit-tighten survivors).
+		// Deny-by-default: create_issue is omitted (issue creation = escalation + a labels[]
+		// trigger-label vector). Every SCM-mutation / lifecycle-escalation tool is likewise absent.
 		operator: []string{
 			"task_list",
 			"list_issues", "list_commits",
-			"close_issue", "edit_issue", "create_issue",
+			"close_issue", "edit_issue",
 			"comment_on_issue",
 		},
 	},
