@@ -75,6 +75,69 @@ func TestClient_AddsAcceptHeader(t *testing.T) {
 	assert.Equal(t, "application/json", gotAccept)
 }
 
+func TestClient_StampsRequestIDFromTurnID(t *testing.T) {
+	t.Setenv("TATARA_TURN_ID", "turn-abc123")
+	t.Setenv("RUN_ID", "job-should-be-ignored")
+
+	var gotReqID string
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		gotReqID = r.Header.Get("X-Request-Id")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{BaseURL: srv.URL, Token: freshToken()})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	assert.Equal(t, "turn-abc123", gotReqID, "X-Request-Id must carry TATARA_TURN_ID verbatim")
+}
+
+func TestClient_StampsRequestIDFallsBackToRunID(t *testing.T) {
+	t.Setenv("TATARA_TURN_ID", "")
+	t.Setenv("RUN_ID", "ingest-job-42")
+
+	var gotReqID string
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		gotReqID = r.Header.Get("X-Request-Id")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{BaseURL: srv.URL, Token: freshToken()})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	assert.Equal(t, "ingest-job-42", gotReqID, "X-Request-Id must fall back to RUN_ID when TATARA_TURN_ID is absent")
+}
+
+func TestClient_OmitsRequestIDWhenUnset(t *testing.T) {
+	t.Setenv("TATARA_TURN_ID", "")
+	t.Setenv("RUN_ID", "")
+
+	var hadReqID bool
+	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+		_, hadReqID = r.Header["X-Request-Id"]
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	c, err := New(Config{BaseURL: srv.URL, Token: freshToken()})
+	require.NoError(t, err)
+
+	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	assert.False(t, hadReqID, "X-Request-Id must be omitted when no correlation id is in the environment")
+}
+
 func TestClient_SetsContentTypeWhenBody(t *testing.T) {
 	var gotCT string
 	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
