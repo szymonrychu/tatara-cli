@@ -687,8 +687,8 @@ func OperatorTools() []Tool {
 				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr + "/close"
 				return http.MethodPost, path, body, nil
 			}),
-		op("edit_issue", "Edit an existing issue: patch title, body, and/or labels (only supplied fields are sent). Use to tighten scope or correct labels. project defaults to TATARA_PROJECT env when omitted.",
-			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string","description":"Repository slug, e.g. szymonrychu/tatara-cli."},"number":{"type":"integer","description":"Issue number."},"title":{"type":"string","description":"New title (omit to leave unchanged)."},"body":{"type":"string","description":"New body (omit to leave unchanged)."},"labels":{"type":"array","items":{"type":"string"},"description":"Replacement label set (omit to leave labels unchanged)."}},"required":["repo","number"]}`,
+		op("edit_issue", "Edit an existing issue: patch title and/or body (only supplied fields are sent). Use to tighten scope. Labels are NOT editable here - issue labels drive the lifecycle and stay operator/maintainer controlled, so the refiner never sets them. project defaults to TATARA_PROJECT env when omitted.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string","description":"Repository slug, e.g. szymonrychu/tatara-cli."},"number":{"type":"integer","description":"Issue number."},"title":{"type":"string","description":"New title (omit to leave unchanged)."},"body":{"type":"string","description":"New body (omit to leave unchanged)."}},"required":["repo","number"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				p := argOrEnv(a, "project", "TATARA_PROJECT")
 				if p == "" {
@@ -710,11 +710,8 @@ func OperatorTools() []Tool {
 				if v, ok := a["body"]; ok {
 					body["body"] = v
 				}
-				if v, ok := a["labels"]; ok {
-					body["labels"] = v
-				}
 				if len(body) == 0 {
-					return "", "", nil, fmt.Errorf("edit_issue requires at least one of title, body, labels")
+					return "", "", nil, fmt.Errorf("edit_issue requires at least one of title, body")
 				}
 				path := "/projects/" + url.PathEscape(p) + "/issues/" + repoSlugPath(repo) + "/" + numStr
 				return http.MethodPatch, path, body, nil
