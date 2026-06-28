@@ -100,6 +100,21 @@ func TestNewServer_ProfileCounts(t *testing.T) {
 	}
 }
 
+func TestNewServer_RefineProfileFiltersToolSet(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	ch := freshClient(t, "http://chat.invalid")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sRefine := NewServer(mem, op, ch, logger, "refine")
+	// refine = 6 operator + 4 alwaysOn + 13 memory + 19 code-graph, no chat = 42.
+	assert.Equal(t, 42, sRefine.ToolCount(), "refine profile must register exactly 42 tools")
+
+	sFull := NewServer(mem, op, ch, logger, "")
+	assert.Less(t, sRefine.ToolCount(), sFull.ToolCount(),
+		"refine profile must have fewer tools than the fail-open full set")
+}
+
 func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")

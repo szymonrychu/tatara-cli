@@ -2060,6 +2060,29 @@ func TestTool_EditIssue_PatchesOnlyProvided(t *testing.T) {
 	require.False(t, hasBody, "body must NOT be sent when not provided")
 }
 
+func TestTool_EditIssue_DropsLabels(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "myproj")
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := operatorToolByName(t, "edit_issue")
+	// Even if a labels field is passed, edit_issue must never forward it: labels
+	// drive the lifecycle (incl. the trigger label) and stay operator/human
+	// controlled, so the refiner cannot self-escalate via a label edit.
+	_, err := Invoke(context.Background(), c, tool, map[string]any{
+		"repo": "szymonrychu/tatara-cli", "number": float64(7), "title": "t",
+		"labels": []any{"tatara"},
+	})
+	require.NoError(t, err)
+	_, hasLabels := gotBody["labels"]
+	require.False(t, hasLabels, "edit_issue must NOT forward labels (no label self-escalation)")
+}
+
 func TestTool_EditIssue_RequiresRepo(t *testing.T) {
 	t.Setenv("TATARA_PROJECT", "myproj")
 	_, _, _, err := operatorToolByName(t, "edit_issue").Build(map[string]any{
@@ -2081,7 +2104,7 @@ func TestTool_EditIssue_RequiresAtLeastOneField(t *testing.T) {
 	_, _, _, err := operatorToolByName(t, "edit_issue").Build(map[string]any{
 		"repo": "szymonrychu/tatara-cli", "number": float64(7),
 	})
-	require.Error(t, err, "edit_issue with no title/body/labels must fail fast, not send an empty PATCH")
+	require.Error(t, err, "edit_issue with no title/body must fail fast, not send an empty PATCH")
 }
 
 func TestTool_CreateIssue_DirectCreate(t *testing.T) {

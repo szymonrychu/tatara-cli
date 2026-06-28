@@ -267,13 +267,27 @@ func TestProfile_Refine(t *testing.T) {
 	require.NotNil(t, result, "refine profile must resolve")
 
 	must := []string{
-		"list_issues", "list_commits", "close_issue", "edit_issue", "create_issue",
+		"list_issues", "list_commits", "close_issue", "edit_issue",
 		"comment_on_issue", "task_list", "task_get", "repo_list", "report_internal_issue",
 	}
 	for _, m := range must {
 		assert.True(t, result[m], "refine profile missing %q", m)
 	}
-	for _, no := range []string{"propose_issue", "task_update", "subtask_create"} {
+	// Deny-by-default: create_issue (escalation + trigger-label vector) and every
+	// SCM-mutation / lifecycle-escalation tool must be absent from a refine pod.
+	mustNot := []string{
+		"create_issue",
+		"propose_issue",
+		"issue_outcome",
+		"decline_implementation",
+		"already_done",
+		"review_verdict",
+		"pr_outcome",
+		"change_summary",
+		"task_update",
+		"subtask_create",
+	}
+	for _, no := range mustNot {
 		assert.False(t, result[no], "refine profile must NOT grant %q", no)
 	}
 }
