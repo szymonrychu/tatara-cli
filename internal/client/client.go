@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type Client struct {
 	reload    func() (*auth.Token, error)
 	save      func(*auth.Token) error
 	log       *slog.Logger
+	requestID string // correlation id stamped as X-Request-Id; fixed for the client's lifetime
 }
 
 // Config holds constructor parameters for Client.
@@ -42,6 +44,19 @@ type Config struct {
 	Save      func(*auth.Token) error
 	HTTP      *http.Client
 	Log       *slog.Logger // optional; refresh outcomes logged at INFO/ERROR when set
+}
+
+// correlationID returns the per-turn id to stamp on outbound requests as
+// X-Request-Id, so one agent turn is greppable across services. The wrapper
+// relaunches the agent per turn and injects TATARA_TURN_ID, so reading it once
+// at construction is correct. Falls back to RUN_ID (set for job-style runs),
+// else empty. The value is already valid for the memory and chat validators, so
+// no transform is applied.
+func correlationID() string {
+	if id := os.Getenv("TATARA_TURN_ID"); id != "" {
+		return id
+	}
+	return os.Getenv("RUN_ID")
 }
 
 // New creates a Client from cfg. BaseURL is required.
@@ -62,6 +77,7 @@ func New(cfg Config) (*Client, error) {
 		reload:    cfg.Reload,
 		save:      cfg.Save,
 		log:       cfg.Log,
+		requestID: correlationID(),
 	}, nil
 }
 
@@ -113,6 +129,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.R
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	if c.requestID != "" {
+		req.Header.Set("X-Request-Id", c.requestID)
+	}
 	resp, err := c.http.Do(req)
 	durMs := float64(time.Since(start).Milliseconds())
 	if c.log != nil {
@@ -121,6 +140,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.R
 			"path", path,
 			"status_code", statusCode(resp),
 			"duration_ms", durMs,
+			"request_id", c.requestID,
 			"error", err,
 		)
 	}
