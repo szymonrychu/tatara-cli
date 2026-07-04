@@ -37,12 +37,25 @@ func TestResolveProfile_EmptyReturnsNil(t *testing.T) {
 	assert.Contains(t, buf.String(), "level=WARN", "empty profile must log WARN")
 }
 
-func TestResolveProfile_UnknownReturnsNil(t *testing.T) {
+func TestResolveProfile_UnknownFailsClosed(t *testing.T) {
 	var buf strings.Builder
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	result := resolveProfile("nonexistent_profile", log)
-	assert.Nil(t, result, "unknown profile must return nil (fail-open)")
+	result := resolveProfile("nonsense-kind", log)
+	require.NotNil(t, result, "unknown non-empty profile must fail closed to the tightest safe set, not nil")
 	assert.Contains(t, buf.String(), "level=WARN", "unknown profile must log WARN")
+	// must not grant any write/mutation tools.
+	for _, name := range []string{
+		"change_summary", "decline_implementation", "already_done", "submit_handover",
+		"review_verdict", "task_update", "subtask_create", "subtask_update",
+		"comment_on_issue", "create_issue", "close_issue", "edit_issue",
+	} {
+		assert.False(t, result[name], "unknown profile must NOT grant %q", name)
+	}
+	// must only be the alwaysOn set.
+	assert.Equal(t, len(alwaysOn), len(result), "unknown profile must be exactly the alwaysOn set")
+	for _, name := range alwaysOn {
+		assert.True(t, result[name], "unknown profile must include alwaysOn tool %q", name)
+	}
 }
 
 func TestResolveProfile_KnownProfilesNonEmpty(t *testing.T) {
