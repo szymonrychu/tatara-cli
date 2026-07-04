@@ -67,22 +67,24 @@ func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
 	require.Equal(t, 68, s.ToolCount(), "full tool count must be 68")
 }
 
-func TestNewServer_ProfileReducesToolSet(t *testing.T) {
+// Component 4a: tools/list must be byte-identical across profiles (a shared
+// prompt-cache prefix requires it), so registration no longer varies by
+// profile. Per-profile restriction now lives at call time (see
+// TestCallTool_* below), not at registration/list time.
+func TestNewServer_ProfileDoesNotReduceToolSet(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
 	ch := freshClient(t, "http://chat.invalid")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// implement has no chat, so it has fewer tools than lifecycle (which has chat)
 	sImpl := NewServer(mem, op, ch, logger, "implement")
 	sLifecycle := NewServer(mem, op, ch, logger, "lifecycle")
-	assert.Less(t, sImpl.ToolCount(), sLifecycle.ToolCount(),
-		"implement (no chat) must have fewer tools than lifecycle (with chat)")
-
-	// implement profile must be less than full set
 	sFull := NewServer(mem, op, ch, logger, "")
-	assert.Less(t, sImpl.ToolCount(), sFull.ToolCount(),
-		"implement profile must have fewer tools than full set")
+
+	assert.Equal(t, sFull.ToolCount(), sImpl.ToolCount(),
+		"implement profile must register the same tool count as the full/empty-profile server")
+	assert.Equal(t, sFull.ToolCount(), sLifecycle.ToolCount(),
+		"lifecycle profile must register the same tool count as the full/empty-profile server")
 }
 
 func TestNewServer_ProfileCounts(t *testing.T) {
@@ -91,28 +93,29 @@ func TestNewServer_ProfileCounts(t *testing.T) {
 	ch := freshClient(t, "http://chat.invalid")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Verify each known profile registers a consistent count (non-zero, less than full).
+	// Every known profile registers (lists) the exact full tool count -
+	// registration/tools-list no longer varies by profile.
 	fullCount := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
 	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
 		s := NewServer(mem, op, ch, logger, profile)
-		assert.Greater(t, s.ToolCount(), 0, "profile %q must register at least one tool", profile)
-		assert.LessOrEqual(t, s.ToolCount(), fullCount, "profile %q must not exceed full count", profile)
+		assert.Equal(t, fullCount, s.ToolCount(), "profile %q must register the full tool count", profile)
 	}
 }
 
-func TestNewServer_RefineProfileFiltersToolSet(t *testing.T) {
+func TestNewServer_RefineProfileListsFullSetButRestrictsCalls(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
 	ch := freshClient(t, "http://chat.invalid")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	sRefine := NewServer(mem, op, ch, logger, "refine")
-	// refine = 6 operator + 4 alwaysOn + 13 memory + 19 code-graph, no chat = 42.
-	assert.Equal(t, 42, sRefine.ToolCount(), "refine profile must register exactly 42 tools")
-
 	sFull := NewServer(mem, op, ch, logger, "")
-	assert.Less(t, sRefine.ToolCount(), sFull.ToolCount(),
-		"refine profile must have fewer tools than the fail-open full set")
+	// refine still lists the full 68 tools (registration is profile-invariant);
+	// only the resolved allow-set (enforced at call time) is the 42-tool refine set.
+	assert.Equal(t, sFull.ToolCount(), sRefine.ToolCount(),
+		"refine profile must list the same tool count as the fail-open full set")
+	assert.Len(t, sRefine.allow, 42, "refine profile's resolved allow-set must be exactly 42 tools")
+	assert.Nil(t, sFull.allow, "empty profile's resolved allow-set must be nil (fail-open)")
 }
 
 func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
@@ -344,4 +347,112 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 
 	after := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "create_memory", "result": "ok"}))
 	assert.Equal(t, before+1, after, "ToolCallsTotal must increment on success")
+}
+
+// startClient wires an in-process MCP client against srv and completes the
+// initialize handshake, returning a ready-to-call client.
+func startClient(ctx context.Context, t *testing.T, srv *Server) *mcpclient.Client {
+	t.Helper()
+	cli, err := mcpclient.NewInProcessClient(srv.srv)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+	require.NoError(t, cli.Start(ctx))
+	var initReq mcplib.InitializeRequest
+	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
+	_, err = cli.Initialize(ctx, initReq)
+	require.NoError(t, err)
+	return cli
+}
+
+// TestCallTool_NonAllowedToolReturnsAuthzErrorAndSkipsHandler verifies
+// Component 4a's call-time authz guard: a tool NOT in the resolved profile's
+// allow-set is still listed (tools/list is profile-invariant) but errors on
+// call, and the handler/backend is never actually reached.
+func TestCallTool_NonAllowedToolReturnsAuthzErrorAndSkipsHandler(t *testing.T) {
+	var chatHit bool
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"room-1"}`))
+	}))
+	defer chat.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// "refine" has no chat tools in its allow-set.
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
+		freshClient(t, chat.URL), logger, "refine")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
+	require.True(t, res.IsError, "a tool outside the profile's allow-set must return an authz error")
+	require.False(t, chatHit, "the backend must never be reached for a denied tool")
+}
+
+// TestCallTool_AlwaysOnToolCallableUnderAnyProfile verifies alwaysOn tools
+// (e.g. task_get) remain callable regardless of the resolved profile.
+func TestCallTool_AlwaysOnToolCallableUnderAnyProfile(t *testing.T) {
+	operator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"task-x","state":"Running"}`))
+	}))
+	defer operator.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, operator.URL),
+		freshClient(t, "http://chat.invalid"), logger, "refine")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
+	require.False(t, res.IsError, "an alwaysOn tool must be callable under any profile")
+}
+
+// TestCallTool_UnknownProfileOnlyAlwaysOnCallable preserves G15: an unknown,
+// non-empty profile still fails closed to the alwaysOn set at call time -
+// every other tool is listed but errors when called.
+func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
+		freshClient(t, backend.URL), logger, "totally-bogus-unknown-profile")
+	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()), srv.ToolCount(),
+		"unknown profile must still list every tool")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	okRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
+	require.False(t, okRes.IsError, "alwaysOn tools must remain callable under an unknown profile")
+
+	deniedRes := callTool(ctx, t, cli, "create_memory", map[string]any{"text": "hello"})
+	require.True(t, deniedRes.IsError, "a non-alwaysOn tool must error under an unknown profile (G15 fail-closed)")
+}
+
+// TestCallTool_EmptyProfileEveryToolCallable verifies the fail-open path is
+// unchanged: with no profile set, every listed tool is also callable.
+func TestCallTool_EmptyProfileEveryToolCallable(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"room-1"}`))
+	}))
+	defer backend.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
+		freshClient(t, backend.URL), logger, "")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
+	require.False(t, res.IsError, "empty profile must allow every tool to be called (fail-open, unchanged)")
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -24,13 +25,24 @@ type Server struct {
 	log       *slog.Logger
 	toolCount int
 	profile   string
+	// allow is the resolved profile allow-set (nil = fail-open, every tool
+	// callable). Component 4a: tools/list is now profile-invariant (every
+	// tool is always registered), so allow is enforced at call time instead,
+	// in the register() dispatch closure.
+	allow map[string]bool
 }
 
-// NewServer registers tools filtered by profile. An unrecognized non-empty profile
-// fails closed to the always-on set only (the sole authz boundary, since all agents
-// share one OIDC identity); an empty profile serves the full set (fail-open, for local
-// dev). profile is read from TATARA_TOOL_PROFILE env (or --tool-profile flag) and
-// passed in by the caller.
+// NewServer registers every tool, always, regardless of profile: Component 4a
+// requires tools/list to be byte-identical across every kind so all agent
+// pods share one prompt-cache prefix (tools render first in Anthropic cache
+// order; a per-kind filtered list fragments the cache). Per-profile
+// restriction is enforced at call time instead (see register()), via the
+// resolved allow-set. An unrecognized non-empty profile still fails closed to
+// the always-on set only at call time (the sole authz boundary, since all
+// agents share one OIDC identity); an empty profile allows every tool to be
+// called (fail-open, for local dev) - both unchanged from before, just moved
+// from list-time to call-time. profile is read from TATARA_TOOL_PROFILE env
+// (or --tool-profile flag) and passed in by the caller.
 func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile string) *Server {
 	allow := resolveProfile(profile, log)
 	s := &Server{
@@ -40,24 +52,29 @@ func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile 
 		chat:     chat,
 		log:      log,
 		profile:  profile,
+		allow:    allow,
 	}
 	allTools := append(append(append(AllTools(), OperatorTools()...), ChatTools()...), PlatformTools()...)
 	for _, t := range allTools {
-		if allow == nil || allow[t.Name] {
-			s.register(t)
-			s.toolCount++
-		}
+		s.register(t)
+		s.toolCount++
 	}
 	profileLabel := profile
 	if profileLabel == "" {
 		profileLabel = "all"
 	}
-	obs.RegisteredTools.WithLabelValues(profileLabel).Set(float64(s.toolCount))
-	log.Info("mcp server started", "profile", profile, "registered_tools", s.toolCount)
+	allowedCount := s.toolCount
+	if allow != nil {
+		allowedCount = len(allow)
+	}
+	obs.RegisteredTools.WithLabelValues(profileLabel).Set(float64(allowedCount))
+	log.Info("mcp server started", "profile", profile, "registered_tools", s.toolCount, "allowed_tools", allowedCount)
 	return s
 }
 
-// ToolCount returns the number of registered tools (profile-aware).
+// ToolCount returns the number of registered (listed) tools. This is now
+// profile-invariant: every tool is always registered so tools/list is
+// byte-identical across profiles (Component 4a).
 func (s *Server) ToolCount() int { return s.toolCount }
 
 func (s *Server) clientFor(t Tool) *client.Client {
@@ -98,6 +115,17 @@ func (s *Server) register(t Tool) {
 		start := time.Now()
 		args := req.GetArguments()
 		rid := resourceID(args)
+
+		// Call-time authz (Component 4a, G15): tools/list is now
+		// profile-invariant, so the per-profile allow-set gates execution
+		// here instead of registration. allow == nil means fail-open (every
+		// tool callable); a non-nil allow-set that does not contain t.Name
+		// denies the call without ever reaching the handler/backend.
+		if s.allow != nil && !s.allow[t.Name] {
+			obs.ToolCallsTotal.WithLabelValues(t.Name, "denied").Inc()
+			s.log.Warn("tool call denied: not in profile allow-set", "tool", t.Name, "profile", s.profile, "resource_id", rid)
+			return mcplib.NewToolResultError(fmt.Sprintf("tool %q is not permitted for profile %q", t.Name, s.profile)), nil
+		}
 
 		// Local-handler path: Handler set => skip HTTP round-trip.
 		if t.Handler != nil {
