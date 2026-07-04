@@ -26,9 +26,11 @@ type Server struct {
 	profile   string
 }
 
-// NewServer registers tools filtered by profile. Empty/unknown profile serves the
-// full set (fail-open). profile is read from TATARA_TOOL_PROFILE env (or --tool-profile
-// flag) and passed in by the caller.
+// NewServer registers tools filtered by profile. An unrecognized non-empty profile
+// fails closed to the always-on set only (the sole authz boundary, since all agents
+// share one OIDC identity); an empty profile serves the full set (fail-open, for local
+// dev). profile is read from TATARA_TOOL_PROFILE env (or --tool-profile flag) and
+// passed in by the caller.
 func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile string) *Server {
 	allow := resolveProfile(profile, log)
 	s := &Server{

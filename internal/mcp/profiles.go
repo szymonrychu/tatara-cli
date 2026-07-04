@@ -4,7 +4,7 @@ import "log/slog"
 
 // toolProfileForKind maps a CRD task Kind to a TATARA_TOOL_PROFILE value.
 // healthCheck uses Kind=brainstorm per the operator (same goal, same tools).
-// Unknown/empty kinds return "" (fail-open: full tool set).
+// Unknown/empty kinds return "" (resolveProfile treats empty specially: fail-open).
 func toolProfileForKind(kind string) string {
 	switch kind {
 	case "implement":
@@ -162,9 +162,13 @@ var profiles = map[string]profileSpec{
 	},
 }
 
-// resolveProfile returns the set of allowed tool names for the given profile, or nil
-// for empty/unknown profiles (fail-open: all tools allowed). A WARN is logged for
-// empty and unknown profiles.
+// resolveProfile returns the set of allowed tool names for the given profile.
+// Empty profile returns nil (fail-open: all tools allowed) - this is a documented,
+// separate case (e.g. local dev without TATARA_TOOL_PROFILE set) and is unchanged.
+// An unrecognized NON-EMPTY profile string fails CLOSED to the alwaysOn set only -
+// profile gating is the sole authz boundary (all agents share one OIDC identity),
+// so a typo'd/unknown profile must never silently grant the full tool surface.
+// A WARN is logged for both empty and unknown profiles.
 func resolveProfile(profile string, log *slog.Logger) map[string]bool {
 	if profile == "" {
 		log.Warn("TATARA_TOOL_PROFILE not set; serving full tool set (fail-open)")
@@ -172,8 +176,12 @@ func resolveProfile(profile string, log *slog.Logger) map[string]bool {
 	}
 	spec, ok := profiles[profile]
 	if !ok {
-		log.Warn("unknown TATARA_TOOL_PROFILE; serving full tool set (fail-open)", "profile", profile)
-		return nil
+		log.Warn("unknown TATARA_TOOL_PROFILE; failing closed to alwaysOn tools only", "profile", profile)
+		allow := make(map[string]bool)
+		for _, n := range alwaysOn {
+			allow[n] = true
+		}
+		return allow
 	}
 
 	allow := make(map[string]bool)
