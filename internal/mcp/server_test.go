@@ -53,7 +53,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 	// After Part B: AllTools is 32 (not 34). After Part C: PlatformTools adds 1.
 	// After refine agent (E2): OperatorTools grows to 25.
-	// Full count: AllTools(32) + OperatorTools(25) + ChatTools(10) + PlatformTools(1) = 68.
+	// Full count: AllTools(32) + OperatorTools(25) + ChatTools(10) + PlatformTools(1) + HandoffTools(4) = 72.
 	assert.Len(t, AllTools(), 32, "AllTools must be 32 after Part B merges")
 }
 
@@ -62,9 +62,9 @@ func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
 	op := freshClient(t, "http://operator.invalid")
 	ch := freshClient(t, "http://chat.invalid")
 	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
-	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
+	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools()) + len(HandoffTools())
 	require.Equal(t, expected, s.ToolCount(), "empty profile must register full set (%d tools)", expected)
-	require.Equal(t, 68, s.ToolCount(), "full tool count must be 68")
+	require.Equal(t, 72, s.ToolCount(), "full tool count must be 72")
 }
 
 // Component 4a: tools/list must be byte-identical across profiles (a shared
@@ -95,7 +95,7 @@ func TestNewServer_ProfileCounts(t *testing.T) {
 
 	// Every known profile registers (lists) the exact full tool count -
 	// registration/tools-list no longer varies by profile.
-	fullCount := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools())
+	fullCount := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools()) + len(HandoffTools())
 	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
 		s := NewServer(mem, op, ch, logger, profile)
 		assert.Equal(t, fullCount, s.ToolCount(), "profile %q must register the full tool count", profile)
@@ -110,11 +110,11 @@ func TestNewServer_RefineProfileListsFullSetButRestrictsCalls(t *testing.T) {
 
 	sRefine := NewServer(mem, op, ch, logger, "refine")
 	sFull := NewServer(mem, op, ch, logger, "")
-	// refine still lists the full 68 tools (registration is profile-invariant);
-	// only the resolved allow-set (enforced at call time) is the 42-tool refine set.
+	// refine still lists the full 72 tools (registration is profile-invariant);
+	// only the resolved allow-set (enforced at call time) is the 46-tool refine set.
 	assert.Equal(t, sFull.ToolCount(), sRefine.ToolCount(),
 		"refine profile must list the same tool count as the fail-open full set")
-	assert.Len(t, sRefine.allow, 42, "refine profile's resolved allow-set must be exactly 42 tools")
+	assert.Len(t, sRefine.allow, 46, "refine profile's resolved allow-set must be exactly 46 tools")
 	assert.Nil(t, sFull.allow, "empty profile's resolved allow-set must be nil (fail-open)")
 }
 
@@ -123,7 +123,7 @@ func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 	op := freshClient(t, "http://operator.invalid")
 	ch := freshClient(t, "http://chat.invalid")
 	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
-	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()), s.ToolCount())
+	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()), s.ToolCount())
 }
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
@@ -411,6 +411,89 @@ func TestCallTool_AlwaysOnToolCallableUnderAnyProfile(t *testing.T) {
 	require.False(t, res.IsError, "an alwaysOn tool must be callable under any profile")
 }
 
+// TestCallTool_RefineCanDeleteHandoff verifies refine (the groomer) can call
+// delete_handoff at call time.
+func TestCallTool_RefineCanDeleteHandoff(t *testing.T) {
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer chat.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
+		freshClient(t, chat.URL), logger, "refine")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "delete_handoff", map[string]any{"handoff_key": "k1"})
+	require.False(t, res.IsError, "refine must be able to call delete_handoff")
+}
+
+// TestCallTool_ImplementDeniedDeleteHandoffButAllowedWriteGetList verifies
+// implement can write/get/list handoffs but is denied delete_handoff
+// (groomer-only, refine).
+func TestCallTool_ImplementDeniedDeleteHandoffButAllowedWriteGetList(t *testing.T) {
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer chat.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
+		freshClient(t, chat.URL), logger, "implement")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	deniedRes := callTool(ctx, t, cli, "delete_handoff", map[string]any{"handoff_key": "k1"})
+	require.True(t, deniedRes.IsError, "implement must be denied delete_handoff")
+
+	writeRes := callTool(ctx, t, cli, "write_handoff", map[string]any{"handoff_key": "k1", "project": "p1", "body": "b"})
+	require.False(t, writeRes.IsError, "implement must be allowed write_handoff")
+
+	getRes := callTool(ctx, t, cli, "get_handoff", map[string]any{"handoff_key": "k1"})
+	require.False(t, getRes.IsError, "implement must be allowed get_handoff")
+
+	listRes := callTool(ctx, t, cli, "list_handoffs", map[string]any{"project": "p1"})
+	require.False(t, listRes.IsError, "implement must be allowed list_handoffs")
+}
+
+// TestCallTool_NonHandoffProfileDeniedAllHandoffTools verifies a profile with
+// no continuity role (review) is denied all 4 handoff tools at call time.
+func TestCallTool_NonHandoffProfileDeniedAllHandoffTools(t *testing.T) {
+	var chatHit bool
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer chat.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
+		freshClient(t, chat.URL), logger, "review")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"write_handoff", map[string]any{"handoff_key": "k1", "project": "p1", "body": "b"}},
+		{"get_handoff", map[string]any{"handoff_key": "k1"}},
+		{"list_handoffs", map[string]any{"project": "p1"}},
+		{"delete_handoff", map[string]any{"handoff_key": "k1"}},
+	} {
+		res := callTool(ctx, t, cli, tc.tool, tc.args)
+		require.True(t, res.IsError, "review profile must be denied %q", tc.tool)
+	}
+	require.False(t, chatHit, "the backend must never be reached for any denied handoff tool")
+}
+
 // TestCallTool_UnknownProfileOnlyAlwaysOnCallable preserves G15: an unknown,
 // non-empty profile still fails closed to the alwaysOn set at call time -
 // every other tool is listed but errors when called.
@@ -424,7 +507,7 @@ func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
 		freshClient(t, backend.URL), logger, "totally-bogus-unknown-profile")
-	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()), srv.ToolCount(),
+	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()), srv.ToolCount(),
 		"unknown profile must still list every tool")
 
 	ctx := context.Background()

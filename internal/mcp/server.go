@@ -54,7 +54,7 @@ func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile 
 		profile:  profile,
 		allow:    allow,
 	}
-	allTools := append(append(append(AllTools(), OperatorTools()...), ChatTools()...), PlatformTools()...)
+	allTools := append(append(append(append(AllTools(), OperatorTools()...), ChatTools()...), PlatformTools()...), HandoffTools()...)
 	for _, t := range allTools {
 		s.register(t)
 		s.toolCount++

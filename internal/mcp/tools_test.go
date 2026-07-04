@@ -329,6 +329,97 @@ func TestChatTools_RequireArgs(t *testing.T) {
 	require.Error(t, err) // participant_id required
 }
 
+func handoffToolByName(t *testing.T, name string) Tool {
+	t.Helper()
+	for _, tl := range HandoffTools() {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("handoff tool %q not found", name)
+	return Tool{}
+}
+
+func TestHandoffTools_Count(t *testing.T) {
+	require.Len(t, HandoffTools(), 4)
+}
+
+func TestHandoffTools_TargetIsChat(t *testing.T) {
+	for _, tl := range HandoffTools() {
+		require.Equal(t, TargetChat, tl.Target)
+	}
+}
+
+func TestHandoffTools_SchemasAreValidJSON(t *testing.T) {
+	for _, tl := range HandoffTools() {
+		var v any
+		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "handoff tool %q has invalid JSON schema", tl.Name)
+	}
+}
+
+func TestHandoffTools_BuildPaths(t *testing.T) {
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		method string
+		path   string
+	}{
+		{"write_handoff", map[string]any{"handoff_key": "k1", "project": "p1", "body": "b"}, http.MethodPost, "/handoffs"},
+		{"list_handoffs", map[string]any{"project": "p1"}, http.MethodGet, "/handoffs?project=p1"},
+		{"list_handoffs", map[string]any{"project": "p1", "repo": "r1"}, http.MethodGet, "/handoffs?project=p1&repo=r1"},
+		{"get_handoff", map[string]any{"handoff_key": "k1"}, http.MethodGet, "/handoffs/k1"},
+		{"delete_handoff", map[string]any{"handoff_key": "k1"}, http.MethodDelete, "/handoffs/k1"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			m, p, _, err := handoffToolByName(t, c.tool).Build(c.args)
+			require.NoError(t, err)
+			require.Equal(t, c.method, m)
+			require.Equal(t, c.path, p)
+		})
+	}
+}
+
+func TestHandoffTools_RequireArgs(t *testing.T) {
+	_, _, _, err := handoffToolByName(t, "write_handoff").Build(map[string]any{})
+	require.Error(t, err) // handoff_key required
+	_, _, _, err = handoffToolByName(t, "write_handoff").Build(map[string]any{"handoff_key": "k1"})
+	require.Error(t, err) // project required
+	_, _, _, err = handoffToolByName(t, "write_handoff").Build(map[string]any{"handoff_key": "k1", "project": "p1"})
+	require.Error(t, err) // body required
+	_, _, _, err = handoffToolByName(t, "list_handoffs").Build(map[string]any{})
+	require.Error(t, err) // project required
+	_, _, _, err = handoffToolByName(t, "get_handoff").Build(map[string]any{})
+	require.Error(t, err) // handoff_key required
+	_, _, _, err = handoffToolByName(t, "delete_handoff").Build(map[string]any{})
+	require.Error(t, err) // handoff_key required
+}
+
+func TestHandoffTools_WriteHandoffBody(t *testing.T) {
+	_, _, body, err := handoffToolByName(t, "write_handoff").Build(map[string]any{
+		"handoff_key": "k1", "project": "p1", "repo": "r1", "kind": "implement", "body": "summary",
+	})
+	require.NoError(t, err)
+	m := body.(map[string]any)
+	require.Equal(t, "k1", m["handoff_key"])
+	require.Equal(t, "p1", m["project"])
+	require.Equal(t, "r1", m["repo"])
+	require.Equal(t, "implement", m["kind"])
+	require.Equal(t, "summary", m["body"])
+}
+
+func TestHandoffTools_WriteHandoffBodyOmitsOptionalFields(t *testing.T) {
+	_, _, body, err := handoffToolByName(t, "write_handoff").Build(map[string]any{
+		"handoff_key": "k1", "project": "p1", "body": "summary",
+	})
+	require.NoError(t, err)
+	m := body.(map[string]any)
+	_, hasRepo := m["repo"]
+	_, hasKind := m["kind"]
+	require.False(t, hasRepo, "repo must be omitted when not given")
+	require.False(t, hasKind, "kind must be omitted when not given")
+}
+
 func TestChatTools_Bodies(t *testing.T) {
 	t.Run("create_room", func(t *testing.T) {
 		_, _, body, err := chatToolByName(t, "chat_create_room").Build(map[string]any{"name": "impl", "created_by": "orchestrator"})

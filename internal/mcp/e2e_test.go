@@ -73,7 +73,7 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	// returned an error (and zero tools) under the 0.4.x marshalling bug.
 	listRes, err := cli.ListTools(ctx, mcplib.ListToolsRequest{})
 	require.NoError(t, err)
-	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools()))
+	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()))
 
 	exposed := map[string]bool{}
 	for _, tl := range listRes.Tools {
