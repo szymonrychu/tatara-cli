@@ -25,6 +25,9 @@ func allRegisteredNames() map[string]bool {
 	for _, t := range PlatformTools() {
 		all[t.Name] = true
 	}
+	for _, t := range HandoffTools() {
+		all[t.Name] = true
+	}
 	return all
 }
 
@@ -318,4 +321,47 @@ func TestRefineProfile_NoChat(t *testing.T) {
 	result := resolveProfile("refine", log)
 	require.NotNil(t, result)
 	assert.False(t, result["chat_create_room"], "refine profile must NOT include chat tools")
+}
+
+// TestHandoffGroup_WriteGetListInContinuityProfiles verifies the 5 continuity
+// profiles (implement, lifecycle, incident, brainstorm, refine) get
+// write_handoff/get_handoff/list_handoffs.
+func TestHandoffGroup_WriteGetListInContinuityProfiles(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, profile := range []string{"implement", "lifecycle", "incident", "brainstorm", "refine"} {
+		result := resolveProfile(profile, log)
+		require.NotNil(t, result, "profile %q must resolve", profile)
+		for _, name := range []string{"write_handoff", "get_handoff", "list_handoffs"} {
+			assert.True(t, result[name], "profile %q must include %q", profile, name)
+		}
+	}
+}
+
+// TestHandoffGroup_AbsentFromNonContinuityProfiles verifies review, triage,
+// and selfImprove get none of the 4 handoff tools.
+func TestHandoffGroup_AbsentFromNonContinuityProfiles(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, profile := range []string{"review", "triage", "selfImprove"} {
+		result := resolveProfile(profile, log)
+		require.NotNil(t, result, "profile %q must resolve", profile)
+		for _, name := range []string{"write_handoff", "get_handoff", "list_handoffs", "delete_handoff"} {
+			assert.False(t, result[name], "profile %q must NOT include %q", profile, name)
+		}
+	}
+}
+
+// TestHandoffDelete_RefineOnly verifies delete_handoff is granted only to
+// refine (the groomer); every other continuity profile can write/get/list
+// but must not delete.
+func TestHandoffDelete_RefineOnly(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	refine := resolveProfile("refine", log)
+	require.NotNil(t, refine)
+	assert.True(t, refine["delete_handoff"], "refine must include delete_handoff")
+
+	for _, profile := range []string{"implement", "lifecycle", "incident", "brainstorm"} {
+		result := resolveProfile(profile, log)
+		require.NotNil(t, result, "profile %q must resolve", profile)
+		assert.False(t, result["delete_handoff"], "profile %q must NOT include delete_handoff (groomer-only)", profile)
+	}
 }

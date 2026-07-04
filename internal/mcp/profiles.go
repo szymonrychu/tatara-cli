@@ -82,6 +82,22 @@ var groupChat = []string{
 	"chat_get_log",
 }
 
+// groupHandoff is the read/write handoff continuation tools: profiles that
+// carry work continuity get these (write/get/list), but NOT delete_handoff
+// (see groupHandoffDelete - refine-only, the groomer).
+var groupHandoff = []string{
+	"write_handoff",
+	"get_handoff",
+	"list_handoffs",
+}
+
+// groupHandoffDelete is delete_handoff, gated to the refine profile alone
+// (refine is the handoff groomer; every other continuity profile can write/
+// read but must never delete another pod's handoff).
+var groupHandoffDelete = []string{
+	"delete_handoff",
+}
+
 // alwaysOn tools are unioned into every profile.
 var alwaysOn = []string{
 	"report_internal_issue",
@@ -92,8 +108,14 @@ var alwaysOn = []string{
 
 // profileSpec defines the operator tool names (beyond alwaysOn) and whether chat is included.
 type profileSpec struct {
-	chat     bool
-	operator []string
+	chat bool
+	// handoff grants the read/write continuation tools (groupHandoff): the
+	// work kinds that carry continuity across pods.
+	handoff bool
+	// handoffDelete grants delete_handoff (groupHandoffDelete). refine-only:
+	// it is the handoff groomer, every other continuity profile is deny-by-default.
+	handoffDelete bool
+	operator      []string
 }
 
 var profiles = map[string]profileSpec{
@@ -101,6 +123,10 @@ var profiles = map[string]profileSpec{
 		// no chat: refine is a headless backlog groomer (close dups/done, edit-tighten survivors).
 		// Deny-by-default: create_issue is omitted (issue creation = escalation + a labels[]
 		// trigger-label vector). Every SCM-mutation / lifecycle-escalation tool is likewise absent.
+		// refine DOES get handoff (list/get/write) + is the sole profile with handoffDelete: it
+		// grooms stale/done handoffs.
+		handoff:       true,
+		handoffDelete: true,
 		operator: []string{
 			"task_list",
 			"list_issues", "list_commits",
@@ -109,14 +135,16 @@ var profiles = map[string]profileSpec{
 		},
 	},
 	"brainstorm": {
-		chat: true,
+		chat:    true,
+		handoff: true,
 		operator: []string{
 			"task_list", "subtask_list", "subtask_create", "subtask_update",
 			"propose_issue", "comment_on_issue", "skip_research",
 		},
 	},
 	"implement": {
-		chat: false,
+		chat:    false,
+		handoff: true,
 		operator: []string{
 			"task_update", "subtask_list", "subtask_create", "subtask_update",
 			"change_summary", "decline_implementation", "already_done", "submit_handover",
@@ -139,7 +167,8 @@ var profiles = map[string]profileSpec{
 	"lifecycle": {
 		// UNION of all states: one long-lived pod spans Triage -> Implement -> MRCI -> Merge.
 		// Per-lifecycle-state gating infeasible without restarting the MCP server.
-		chat: true,
+		chat:    true,
+		handoff: true,
 		operator: []string{
 			"task_list", "task_update", "subtask_list", "subtask_create", "subtask_update",
 			"issue_outcome", "comment", "comment_on_issue", "change_summary",
@@ -147,7 +176,8 @@ var profiles = map[string]profileSpec{
 		},
 	},
 	"incident": {
-		chat: true,
+		chat:    true,
+		handoff: true,
 		operator: []string{
 			"task_list", "task_update", "subtask_list", "subtask_create", "subtask_update",
 			"propose_issue", "comment_on_issue", "change_summary", "decline_implementation", "submit_handover",
@@ -195,6 +225,18 @@ func resolveProfile(profile string, log *slog.Logger) map[string]bool {
 	// chat conditional
 	if spec.chat {
 		for _, n := range groupChat {
+			allow[n] = true
+		}
+	}
+	// handoff conditional (write/get/list): continuity-carrying profiles only
+	if spec.handoff {
+		for _, n := range groupHandoff {
+			allow[n] = true
+		}
+	}
+	// handoffDelete conditional: refine (the groomer) only
+	if spec.handoffDelete {
+		for _, n := range groupHandoffDelete {
 			allow[n] = true
 		}
 	}

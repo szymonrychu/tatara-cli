@@ -918,6 +918,74 @@ func ChatTools() []Tool {
 	}
 }
 
+// HandoffTools returns the 4 handoff MCP tools (Target: TargetChat). Handoffs
+// are compact per-issue continuation summaries stored in tatara-chat, keyed by
+// the wrapper's CONVERSATION_OBJECT_KEY. See
+// docs/superpowers/specs/2026-07-04-handoff-continuation-design.md Component 2.
+func HandoffTools() []Tool {
+	chat := func(name, desc, schema string, build func(map[string]any) (string, string, any, error)) Tool {
+		return Tool{Name: name, Description: desc, Schema: json.RawMessage(schema), Target: TargetChat, Build: build}
+	}
+	return []Tool{
+		chat("write_handoff", "Write (upsert) a compact continuation handoff for a project/repo, keyed by handoff_key. Latest write wins.",
+			`{"type":"object","properties":{"handoff_key":{"type":"string"},"project":{"type":"string"},"repo":{"type":"string"},"kind":{"type":"string"},"body":{"type":"string"}},"required":["handoff_key","project","body"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				if argString(a, "handoff_key") == "" {
+					return "", "", nil, fmt.Errorf("handoff_key required")
+				}
+				if argString(a, "project") == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				if argString(a, "body") == "" {
+					return "", "", nil, fmt.Errorf("body required")
+				}
+				body := map[string]any{
+					"handoff_key": a["handoff_key"],
+					"project":     a["project"],
+					"body":        a["body"],
+				}
+				if v := argString(a, "repo"); v != "" {
+					body["repo"] = v
+				}
+				if v := argString(a, "kind"); v != "" {
+					body["kind"] = v
+				}
+				return http.MethodPost, "/handoffs", body, nil
+			}),
+		chat("list_handoffs", "List handoffs for a project, optionally scoped to a repo, ordered most-recently-updated first.",
+			`{"type":"object","properties":{"project":{"type":"string"},"repo":{"type":"string"}},"required":["project"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				if argString(a, "project") == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				q := url.Values{}
+				q.Set("project", argString(a, "project"))
+				if v := argString(a, "repo"); v != "" {
+					q.Set("repo", v)
+				}
+				return http.MethodGet, "/handoffs?" + q.Encode(), nil, nil
+			}),
+		chat("get_handoff", "Get a single handoff by its handoff_key.",
+			`{"type":"object","properties":{"handoff_key":{"type":"string"}},"required":["handoff_key"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				key := argString(a, "handoff_key")
+				if key == "" {
+					return "", "", nil, fmt.Errorf("handoff_key required")
+				}
+				return http.MethodGet, "/handoffs/" + url.PathEscape(key), nil, nil
+			}),
+		chat("delete_handoff", "Delete a handoff by its handoff_key (idempotent). Groomer-only: only the refine profile can call this.",
+			`{"type":"object","properties":{"handoff_key":{"type":"string"}},"required":["handoff_key"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				key := argString(a, "handoff_key")
+				if key == "" {
+					return "", "", nil, fmt.Errorf("handoff_key required")
+				}
+				return http.MethodDelete, "/handoffs/" + url.PathEscape(key), nil, nil
+			}),
+	}
+}
+
 // validCategories is the set of allowed category enum values for report_internal_issue.
 var validCategories = map[string]bool{
 	"tool_error":              true,
