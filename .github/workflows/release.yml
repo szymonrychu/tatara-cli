@@ -1,0 +1,94 @@
+name: release
+
+# Semver push-CD (docs/superpowers/specs/2026-06-28-semver-push-cd-design.md).
+# On merge to main, after the build/test/publish gate is green:
+#   1. cd-release tag    - read the merged PR's semver:<level> label, cut the
+#                          next git tag vX.Y.Z, push it.
+#   2. publish image     - build.sh re-runs with the tag present, so its
+#                          `git describe` resolves to vX.Y.Z and harbor gets
+#                          both :SHORT_SHA (traceability) and :vX.Y.Z (the pin).
+#   3. cd-release bump   - rewrite the 3 wrapper build-arg pins (Dockerfile,
+#                          Makefile, build.sh) lockstep in ONE commit, open an
+#                          auto-merge PR labeled semver:patch.
+# Push trigger (not workflow_run) so the cd-release action sees the merge commit
+# as $GITHUB_SHA for `gh pr list --search`.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: tatara-cli
+    steps:
+      - uses: actions/checkout@v4
+      - name: build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run lint
+
+  test:
+    runs-on: tatara-cli
+    steps:
+      - uses: actions/checkout@v4
+      - name: build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run test
+
+  build:
+    runs-on: tatara-cli
+    steps:
+      - uses: actions/checkout@v4
+      - name: build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run build
+
+  release:
+    runs-on: tatara-cli
+    needs: [lint, test, build]
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.TATARA_CD_TOKEN }}
+      - name: install buildctl
+        run: |
+          curl -sSfL "https://github.com/moby/buildkit/releases/download/v0.18.2/buildkit-v0.18.2.linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local bin/buildctl
+      - name: cut semver tag
+        id: tag
+        uses: szymonrychu/tatara-helmfile/.github/actions/cd-release@main
+        with:
+          mode: tag
+          token: ${{ secrets.TATARA_CD_TOKEN }}
+      - name: build and push image at vX.Y.Z
+        run: bash .github/ci/build.sh "${{ github.event.repository.name }}"
+      - name: bump wrapper pins
+        uses: szymonrychu/tatara-helmfile/.github/actions/cd-release@main
+        with:
+          mode: bump
+          token: ${{ secrets.TATARA_CD_TOKEN }}
+          parent_repo: szymonrychu/tatara-claude-code-wrapper
+          new_value: ${{ steps.tag.outputs.version }}
+          pr_label: semver:patch
+          pins: >-
+            [
+              {"file":"Dockerfile","pattern":"^ARG TATARA_CLI_VERSION=.*$","value_template":"ARG TATARA_CLI_VERSION={{version}}"},
+              {"file":"Makefile","pattern":"^TATARA_CLI_VERSION \\?= .*$","value_template":"TATARA_CLI_VERSION ?= {{version}}"},
+              {"file":".github/ci/build.sh","pattern":"^TATARA_CLI_VERSION=\"\\$\\{TATARA_CLI_VERSION:-[^}]*\\}\"$","value_template":"TATARA_CLI_VERSION=\"${TATARA_CLI_VERSION:-{{version}}}\""}
+            ]
