@@ -19,8 +19,6 @@ func toolProfileForKind(kind string) string {
 		return "lifecycle"
 	case "incident":
 		return "incident"
-	case "selfImprove":
-		return "selfImprove"
 	case "refine":
 		return "refine"
 	case "documentation":
@@ -183,13 +181,6 @@ var profiles = map[string]profileSpec{
 		operator: []string{
 			"task_list", "task_update", "subtask_list", "subtask_create", "subtask_update",
 			"propose_issue", "comment_on_issue", "change_summary", "decline_implementation", "submit_handover",
-		},
-	},
-	"selfImprove": {
-		chat: false,
-		operator: []string{
-			"task_update", "subtask_list", "subtask_create", "subtask_update",
-			"change_summary", "pr_outcome", "decline_implementation", "already_done", "submit_handover",
 		},
 	},
 	"documentation": {

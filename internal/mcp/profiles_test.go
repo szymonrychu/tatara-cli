@@ -63,7 +63,7 @@ func TestResolveProfile_UnknownFailsClosed(t *testing.T) {
 
 func TestResolveProfile_KnownProfilesNonEmpty(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "documentation"} {
 		result := resolveProfile(profile, log)
 		assert.NotNil(t, result, "profile %q must return non-nil set", profile)
 		assert.Greater(t, len(result), 0, "profile %q must be non-empty", profile)
@@ -73,7 +73,7 @@ func TestResolveProfile_KnownProfilesNonEmpty(t *testing.T) {
 func TestResolveProfile_AlwaysOnInAllProfiles(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	alwaysOn := []string{"report_internal_issue", "project_get", "repo_list", "task_get"}
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for _, name := range alwaysOn {
@@ -84,7 +84,7 @@ func TestResolveProfile_AlwaysOnInAllProfiles(t *testing.T) {
 
 func TestResolveProfile_ReportInternalIssueInEveryProfile(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result)
 		assert.True(t, result["report_internal_issue"], "report_internal_issue must be in profile %q", profile)
@@ -94,7 +94,7 @@ func TestResolveProfile_ReportInternalIssueInEveryProfile(t *testing.T) {
 func TestResolveProfile_AllNamesExistInRegistries(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registered := allRegisteredNames()
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for name := range result {
@@ -237,17 +237,6 @@ func TestReviewProfile_NoChatLimitedTools(t *testing.T) {
 	assert.True(t, result["submit_handover"])
 }
 
-func TestSelfImproveProfile_NoChatHasPrOutcome(t *testing.T) {
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	result := resolveProfile("selfImprove", log)
-	require.NotNil(t, result)
-	assert.False(t, result["chat_create_room"], "selfImprove must NOT include chat tools")
-	assert.True(t, result["pr_outcome"], "selfImprove must include pr_outcome")
-	assert.True(t, result["change_summary"])
-	assert.True(t, result["decline_implementation"])
-	assert.True(t, result["already_done"])
-}
-
 func TestDocumentationProfile_CorrectOperatorTools(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	result := resolveProfile("documentation", log)
@@ -307,7 +296,6 @@ func TestKindToProfile(t *testing.T) {
 		{"brainstorm", "brainstorm"},
 		{"issueLifecycle", "lifecycle"},
 		{"incident", "incident"},
-		{"selfImprove", "selfImprove"},
 		{"healthCheck", "brainstorm"}, // healthCheck shares Kind=brainstorm
 		{"refine", "refine"},
 		{"documentation", "documentation"},
@@ -385,11 +373,11 @@ func TestHandoffGroup_WriteGetListInContinuityProfiles(t *testing.T) {
 	}
 }
 
-// TestHandoffGroup_AbsentFromNonContinuityProfiles verifies review, triage,
-// and selfImprove get none of the 4 handoff tools.
+// TestHandoffGroup_AbsentFromNonContinuityProfiles verifies review and triage
+// get none of the 4 handoff tools.
 func TestHandoffGroup_AbsentFromNonContinuityProfiles(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"review", "triage", "selfImprove"} {
+	for _, profile := range []string{"review", "triage"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for _, name := range []string{"write_handoff", "get_handoff", "list_handoffs", "delete_handoff"} {
@@ -412,4 +400,34 @@ func TestHandoffDelete_RefineOnly(t *testing.T) {
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		assert.False(t, result["delete_handoff"], "profile %q must NOT include delete_handoff (groomer-only)", profile)
 	}
+}
+
+func TestSelfImproveProfileRemoved(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Kind no longer maps to a profile.
+	assert.Equal(t, "", toolProfileForKind("selfImprove"), "selfImprove kind must not map to a profile")
+	// The named profile no longer exists: resolveProfile fails closed to alwaysOn.
+	result := resolveProfile("selfImprove", log)
+	require.NotNil(t, result)
+	assert.False(t, result["pr_outcome"], "removed selfImprove profile must not grant pr_outcome")
+	assert.False(t, result["change_summary"], "removed selfImprove profile must not grant change_summary")
+	assert.True(t, result["report_internal_issue"], "alwaysOn set must survive fail-closed")
+}
+
+func TestLifecycleProfileHasPrOutcomeAndCodeGraph(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("lifecycle", log)
+	require.NotNil(t, result)
+	assert.True(t, result["pr_outcome"], "lifecycle must retain pr_outcome for close signalling")
+	assert.True(t, result["code_search"], "lifecycle must include the code-graph group")
+}
+
+func TestBrainstormProfileHasCodeGraph(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("brainstorm", log)
+	require.NotNil(t, result)
+	for _, tool := range []string{"code_search", "code_explain", "code_cross_repo", "code_important"} {
+		assert.True(t, result[tool], "brainstorm must include code-graph tool %q", tool)
+	}
+	assert.True(t, result["propose_issue"], "brainstorm must retain propose_issue")
 }
