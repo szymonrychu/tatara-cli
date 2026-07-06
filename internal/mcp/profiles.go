@@ -23,6 +23,8 @@ func toolProfileForKind(kind string) string {
 		return "selfImprove"
 	case "refine":
 		return "refine"
+	case "documentation":
+		return "documentation"
 	default:
 		return ""
 	}
@@ -188,6 +190,16 @@ var profiles = map[string]profileSpec{
 		operator: []string{
 			"task_update", "subtask_list", "subtask_create", "subtask_update",
 			"change_summary", "pr_outcome", "decline_implementation", "already_done", "submit_handover",
+		},
+	},
+	"documentation": {
+		// no chat: single-shot, no human/peer conversation.
+		// handoff on: carries continuity same as implement/incident (reroll/blocked path).
+		chat:    false,
+		handoff: true,
+		operator: []string{
+			"task_update", "subtask_list", "subtask_create", "subtask_update",
+			"change_summary", "decline_implementation", "already_done",
 		},
 	},
 }

@@ -63,7 +63,7 @@ func TestResolveProfile_UnknownFailsClosed(t *testing.T) {
 
 func TestResolveProfile_KnownProfilesNonEmpty(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
 		result := resolveProfile(profile, log)
 		assert.NotNil(t, result, "profile %q must return non-nil set", profile)
 		assert.Greater(t, len(result), 0, "profile %q must be non-empty", profile)
@@ -73,7 +73,7 @@ func TestResolveProfile_KnownProfilesNonEmpty(t *testing.T) {
 func TestResolveProfile_AlwaysOnInAllProfiles(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	alwaysOn := []string{"report_internal_issue", "project_get", "repo_list", "task_get"}
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for _, name := range alwaysOn {
@@ -84,7 +84,7 @@ func TestResolveProfile_AlwaysOnInAllProfiles(t *testing.T) {
 
 func TestResolveProfile_ReportInternalIssueInEveryProfile(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result)
 		assert.True(t, result["report_internal_issue"], "report_internal_issue must be in profile %q", profile)
@@ -94,7 +94,7 @@ func TestResolveProfile_ReportInternalIssueInEveryProfile(t *testing.T) {
 func TestResolveProfile_AllNamesExistInRegistries(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	registered := allRegisteredNames()
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
+	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for name := range result {
@@ -248,6 +248,53 @@ func TestSelfImproveProfile_NoChatHasPrOutcome(t *testing.T) {
 	assert.True(t, result["already_done"])
 }
 
+func TestDocumentationProfile_CorrectOperatorTools(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("documentation", log)
+	require.NotNil(t, result, "documentation profile must resolve (not fail closed)")
+
+	// must have: single-shot doc-editing terminals + subtask continuity.
+	for _, name := range []string{
+		"task_update", "subtask_list", "subtask_create", "subtask_update",
+		"change_summary", "decline_implementation", "already_done",
+	} {
+		assert.True(t, result[name], "documentation must include %q", name)
+	}
+	// no chat; no issue/PR/review escalation surface (docs agent never touches
+	// the triggering component repo's issue tracker, only opens/edits the docs MR).
+	for _, name := range []string{
+		"chat_create_room", "propose_issue", "comment_on_issue", "comment",
+		"issue_outcome", "pr_outcome", "review_verdict", "create_issue", "close_issue", "edit_issue",
+	} {
+		assert.False(t, result[name], "documentation must NOT include %q", name)
+	}
+}
+
+func TestDocumentationProfile_HasMemoryAndCodeGraph(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("documentation", log)
+	require.NotNil(t, result)
+	assert.True(t, result["query"], "documentation profile must include memory tools")
+	assert.True(t, result["code_search"], "documentation profile must include code-graph tools")
+}
+
+func TestDocumentationProfile_NoChat(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("documentation", log)
+	require.NotNil(t, result)
+	assert.False(t, result["chat_create_room"], "documentation profile must NOT include chat tools")
+}
+
+func TestDocumentationProfile_HasHandoffNotDelete(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("documentation", log)
+	require.NotNil(t, result)
+	for _, name := range []string{"write_handoff", "get_handoff", "list_handoffs"} {
+		assert.True(t, result[name], "documentation must include %q", name)
+	}
+	assert.False(t, result["delete_handoff"], "documentation must NOT include delete_handoff (groomer-only)")
+}
+
 // TestKindToProfile: table-driven mapping from CRD kind -> profile name.
 func TestKindToProfile(t *testing.T) {
 	cases := []struct {
@@ -263,6 +310,7 @@ func TestKindToProfile(t *testing.T) {
 		{"selfImprove", "selfImprove"},
 		{"healthCheck", "brainstorm"}, // healthCheck shares Kind=brainstorm
 		{"refine", "refine"},
+		{"documentation", "documentation"},
 		{"unknown", ""},
 		{"", ""},
 	}
@@ -328,7 +376,7 @@ func TestRefineProfile_NoChat(t *testing.T) {
 // write_handoff/get_handoff/list_handoffs.
 func TestHandoffGroup_WriteGetListInContinuityProfiles(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	for _, profile := range []string{"implement", "lifecycle", "incident", "brainstorm", "refine"} {
+	for _, profile := range []string{"implement", "lifecycle", "incident", "brainstorm", "refine", "documentation"} {
 		result := resolveProfile(profile, log)
 		require.NotNil(t, result, "profile %q must resolve", profile)
 		for _, name := range []string{"write_handoff", "get_handoff", "list_handoffs"} {
