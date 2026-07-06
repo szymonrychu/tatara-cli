@@ -153,7 +153,7 @@ func TestOperatorTools_ExplicitArgOverridesEnv(t *testing.T) {
 }
 
 func TestAllOperatorTools_Count(t *testing.T) {
-	require.Len(t, OperatorTools(), 25)
+	require.Len(t, OperatorTools(), 27)
 }
 
 func TestDeclineImplementation_Build(t *testing.T) {
@@ -1579,7 +1579,7 @@ func TestCommentOnIssueTool_RequireArgs(t *testing.T) {
 }
 
 func TestAllOperatorTools_CountAfterCommentOnIssue(t *testing.T) {
-	require.Len(t, OperatorTools(), 25)
+	require.Len(t, OperatorTools(), 27)
 }
 
 // Finding r3-1: bulk_create_memories schema must expose repo, reconcile_files, and
@@ -2275,7 +2275,7 @@ func TestTool_CreateIssue_WithLabels(t *testing.T) {
 }
 
 func TestAllOperatorTools_CountAfterRefine(t *testing.T) {
-	require.Len(t, OperatorTools(), 25)
+	require.Len(t, OperatorTools(), 27)
 }
 
 func TestProposeIssue_SystemicIDForwarded(t *testing.T) {
@@ -2309,4 +2309,66 @@ func TestProposeIssue_SystemicIDForwarded(t *testing.T) {
 		_, has := m["systemicId"]
 		require.False(t, has, "systemicId must be absent when the agent did not supply it")
 	})
+}
+
+func TestHarnessStateGet_BuildsGET(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "")
+	var tool Tool
+	for _, tl := range OperatorTools() {
+		if tl.Name == "harness_state_get" {
+			tool = tl
+		}
+	}
+	require.Equal(t, "harness_state_get", tool.Name)
+	require.Equal(t, TargetOperator, tool.Target)
+	method, path, body, err := tool.Build(map[string]any{"project": "alpha", "key": "LENS_CYCLE"})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodGet, method)
+	require.Equal(t, "/projects/alpha/harness-state/LENS_CYCLE", path)
+	require.Nil(t, body)
+}
+
+func TestHarnessStateGet_RequiresKey(t *testing.T) {
+	var tool Tool
+	for _, tl := range OperatorTools() {
+		if tl.Name == "harness_state_get" {
+			tool = tl
+		}
+	}
+	_, _, _, err := tool.Build(map[string]any{"project": "alpha"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "key required")
+}
+
+func TestHarnessStateCAS_BuildsPOSTWithBody(t *testing.T) {
+	var tool Tool
+	for _, tl := range OperatorTools() {
+		if tl.Name == "harness_state_cas" {
+			tool = tl
+		}
+	}
+	require.Equal(t, TargetOperator, tool.Target)
+	method, path, body, err := tool.Build(map[string]any{
+		"project": "alpha", "key": "LENS_CYCLE", "value": "coupling", "version": "42",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, method)
+	require.Equal(t, "/projects/alpha/harness-state/LENS_CYCLE", path)
+	require.Equal(t, map[string]any{"value": "coupling", "version": "42"}, body)
+}
+
+func TestHarnessStateCAS_EmptyVersionAllowed(t *testing.T) {
+	var tool Tool
+	for _, tl := range OperatorTools() {
+		if tl.Name == "harness_state_cas" {
+			tool = tl
+		}
+	}
+	// version="" is a legitimate "no state yet" first write; presence, not
+	// non-emptiness, is required.
+	_, _, body, err := tool.Build(map[string]any{
+		"project": "alpha", "key": "LENS_CYCLE", "value": "failure-modes", "version": "",
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"value": "failure-modes", "version": ""}, body)
 }

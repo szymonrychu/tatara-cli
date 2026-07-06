@@ -402,6 +402,20 @@ func TestHandoffDelete_RefineOnly(t *testing.T) {
 	}
 }
 
+func TestHarnessStateTools_GatedToBrainstormAndIncident(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, p := range []string{"brainstorm", "incident"} {
+		allow := resolveProfile(p, log)
+		require.True(t, allow["harness_state_get"], "%s must allow harness_state_get", p)
+		require.True(t, allow["harness_state_cas"], "%s must allow harness_state_cas", p)
+	}
+	for _, p := range []string{"refine", "implement", "review", "triage", "lifecycle", "documentation"} {
+		allow := resolveProfile(p, log)
+		require.False(t, allow["harness_state_get"], "%s must NOT allow harness_state_get", p)
+		require.False(t, allow["harness_state_cas"], "%s must NOT allow harness_state_cas", p)
+	}
+}
+
 func TestSelfImproveProfileRemoved(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// Kind no longer maps to a profile.
