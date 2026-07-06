@@ -53,7 +53,8 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 	// After Part B: AllTools is 32 (not 34). After Part C: PlatformTools adds 1.
 	// After refine agent (E2): OperatorTools grows to 25.
-	// Full count: AllTools(32) + OperatorTools(25) + ChatTools(10) + PlatformTools(1) + HandoffTools(4) = 72.
+	// After harness_state tools (Task 3): OperatorTools grows to 27.
+	// Full count: AllTools(32) + OperatorTools(27) + ChatTools(10) + PlatformTools(1) + HandoffTools(4) = 74.
 	assert.Len(t, AllTools(), 32, "AllTools must be 32 after Part B merges")
 }
 
@@ -64,7 +65,7 @@ func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
 	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
 	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools()) + len(HandoffTools())
 	require.Equal(t, expected, s.ToolCount(), "empty profile must register full set (%d tools)", expected)
-	require.Equal(t, 72, s.ToolCount(), "full tool count must be 72")
+	require.Equal(t, 74, s.ToolCount(), "full tool count must be 74")
 }
 
 // Component 4a: tools/list must be byte-identical across profiles (a shared
@@ -110,7 +111,7 @@ func TestNewServer_RefineProfileListsFullSetButRestrictsCalls(t *testing.T) {
 
 	sRefine := NewServer(mem, op, ch, logger, "refine")
 	sFull := NewServer(mem, op, ch, logger, "")
-	// refine still lists the full 72 tools (registration is profile-invariant);
+	// refine still lists the full 74 tools (registration is profile-invariant);
 	// only the resolved allow-set (enforced at call time) is the 46-tool refine set.
 	assert.Equal(t, sFull.ToolCount(), sRefine.ToolCount(),
 		"refine profile must list the same tool count as the fail-open full set")
@@ -128,7 +129,7 @@ func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
 
 func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
 	tools := OperatorTools()
-	require.Len(t, tools, 25)
+	require.Len(t, tools, 27)
 	for _, tl := range tools {
 		var v any
 		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "operator tool %q has invalid JSON schema", tl.Name)

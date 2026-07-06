@@ -504,6 +504,39 @@ func OperatorTools() []Tool {
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/pr-outcome", body, nil
 			}),
+		op("harness_state_get", "Read a durable per-project harness-state value (e.g. the brainstorm LENS_CYCLE rotation register). Returns {key,value,version}; an empty value+version means no state yet - pass version=\"\" to the first harness_state_cas to create it. project defaults to TATARA_PROJECT env.",
+			`{"type":"object","properties":{"project":{"type":"string"},"key":{"type":"string"}},"required":["key"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				key := argString(a, "key")
+				if key == "" {
+					return "", "", nil, fmt.Errorf("key required")
+				}
+				return http.MethodGet, "/projects/" + url.PathEscape(p) + "/harness-state/" + url.PathEscape(key), nil, nil
+			}),
+		op("harness_state_cas", "Compare-and-swap a durable per-project harness-state value. Pass the version you read from harness_state_get; the write succeeds only if no other agent advanced the state first (409 conflict otherwise - re-read and retry). Use version=\"\" for the first write. project defaults to TATARA_PROJECT env.",
+			`{"type":"object","properties":{"project":{"type":"string"},"key":{"type":"string"},"value":{"type":"string"},"version":{"type":"string"}},"required":["key","value","version"]}`,
+			func(a map[string]any) (string, string, any, error) {
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				key := argString(a, "key")
+				if key == "" {
+					return "", "", nil, fmt.Errorf("key required")
+				}
+				if _, ok := a["value"]; !ok {
+					return "", "", nil, fmt.Errorf("value required")
+				}
+				if _, ok := a["version"]; !ok {
+					return "", "", nil, fmt.Errorf("version required")
+				}
+				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/harness-state/" + url.PathEscape(key),
+					map[string]any{"value": a["value"], "version": a["version"]}, nil
+			}),
 		op("change_summary", "Post a change summary for the current task: PR title, PR body, delivered scope, change significance (semver level), optional remaining scope, and optionally what was most problematic.",
 			`{"type":"object","properties":{"task":{"type":"string"},"pr_title":{"type":"string"},"pr_body":{"type":"string"},"delivered_scope":{"type":"string"},"change_significance":{"type":"string","enum":["major","minor","patch"],"description":"major=backward-incompatible (API/CRD break, removed/renamed public surface); minor=backward-compatible new functionality; patch=fix or anything else"},"remaining_scope":{"type":"string"},"most_problematic":{"type":"string","description":"What was most problematic or surprising during implementation (gotchas, dead-ends, tricky integration points). Surfaced in the MR body and recorded in docs."}},"required":["pr_title","pr_body","delivered_scope","change_significance"]}`,
 			func(a map[string]any) (string, string, any, error) {

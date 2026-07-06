@@ -140,6 +140,7 @@ var profiles = map[string]profileSpec{
 		operator: []string{
 			"task_list", "subtask_list", "subtask_create", "subtask_update",
 			"propose_issue", "comment_on_issue", "skip_research",
+			"harness_state_get", "harness_state_cas",
 		},
 	},
 	"implement": {
@@ -181,6 +182,7 @@ var profiles = map[string]profileSpec{
 		operator: []string{
 			"task_list", "task_update", "subtask_list", "subtask_create", "subtask_update",
 			"propose_issue", "comment_on_issue", "change_summary", "decline_implementation", "submit_handover",
+			"harness_state_get", "harness_state_cas",
 		},
 	},
 	"documentation": {
