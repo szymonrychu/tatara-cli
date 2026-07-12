@@ -25,10 +25,11 @@ type Server struct {
 	log       *slog.Logger
 	toolCount int
 	profile   string
-	// allow is the resolved profile allow-set (nil = fail-open, every tool
-	// callable). Component 4a: tools/list is now profile-invariant (every
-	// tool is always registered), so allow is enforced at call time instead,
-	// in the register() dispatch closure.
+	// allow is the resolved profile allow-set (never nil - resolveProfile
+	// always fails closed to at least the alwaysOn set). Component 4a:
+	// tools/list is now profile-invariant (every tool is always registered),
+	// so allow is enforced at call time instead, in the register() dispatch
+	// closure.
 	allow map[string]bool
 }
 
@@ -37,12 +38,11 @@ type Server struct {
 // pods share one prompt-cache prefix (tools render first in Anthropic cache
 // order; a per-kind filtered list fragments the cache). Per-profile
 // restriction is enforced at call time instead (see register()), via the
-// resolved allow-set. An unrecognized non-empty profile still fails closed to
-// the always-on set only at call time (the sole authz boundary, since all
-// agents share one OIDC identity); an empty profile allows every tool to be
-// called (fail-open, for local dev) - both unchanged from before, just moved
-// from list-time to call-time. profile is read from TATARA_TOOL_PROFILE env
-// (or --tool-profile flag) and passed in by the caller.
+// resolved allow-set. Both an unrecognized non-empty profile AND an empty
+// profile fail closed to the alwaysOn set only at call time (the sole authz
+// boundary, since all agents share one OIDC identity) - a missing profile is
+// never a fail-open full tool grant. profile is read from TATARA_TOOL_PROFILE
+// env (or --tool-profile flag) and passed in by the caller.
 func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile string) *Server {
 	allow := resolveProfile(profile, log)
 	s := &Server{
@@ -63,10 +63,7 @@ func NewServer(memory, operator, chat *client.Client, log *slog.Logger, profile 
 	if profileLabel == "" {
 		profileLabel = "all"
 	}
-	allowedCount := s.toolCount
-	if allow != nil {
-		allowedCount = len(allow)
-	}
+	allowedCount := len(allow)
 	obs.RegisteredTools.WithLabelValues(profileLabel).Set(float64(allowedCount))
 	log.Info("mcp server started", "profile", profile, "registered_tools", s.toolCount, "allowed_tools", allowedCount)
 	return s
@@ -118,10 +115,10 @@ func (s *Server) register(t Tool) {
 
 		// Call-time authz (Component 4a, G15): tools/list is now
 		// profile-invariant, so the per-profile allow-set gates execution
-		// here instead of registration. allow == nil means fail-open (every
-		// tool callable); a non-nil allow-set that does not contain t.Name
-		// denies the call without ever reaching the handler/backend.
-		if s.allow != nil && !s.allow[t.Name] {
+		// here instead of registration. allow is never nil (resolveProfile
+		// always fails closed); a tool not in the allow-set is denied
+		// without ever reaching the handler/backend.
+		if !s.allow[t.Name] {
 			obs.ToolCallsTotal.WithLabelValues(t.Name, "denied").Inc()
 			s.log.Warn("tool call denied: not in profile allow-set", "tool", t.Name, "profile", s.profile, "resource_id", rid)
 			return mcplib.NewToolResultError(fmt.Sprintf("tool %q is not permitted for profile %q", t.Name, s.profile)), nil

@@ -114,9 +114,9 @@ func TestNewServer_RefineProfileListsFullSetButRestrictsCalls(t *testing.T) {
 	// refine still lists the full 74 tools (registration is profile-invariant);
 	// only the resolved allow-set (enforced at call time) is the 46-tool refine set.
 	assert.Equal(t, sFull.ToolCount(), sRefine.ToolCount(),
-		"refine profile must list the same tool count as the fail-open full set")
+		"refine profile must list the same tool count as the profile-invariant full registration")
 	assert.Len(t, sRefine.allow, 46, "refine profile's resolved allow-set must be exactly 46 tools")
-	assert.Nil(t, sFull.allow, "empty profile's resolved allow-set must be nil (fail-open)")
+	assert.Len(t, sFull.allow, len(alwaysOn), "empty profile's resolved allow-set must be exactly the alwaysOn set (fail-closed)")
 }
 
 func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
@@ -151,7 +151,7 @@ func TestRegister_LogsInfoOnSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "")
+		freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -191,7 +191,7 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "")
+		freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -249,7 +249,7 @@ func TestRegister_204ReturnsOKMarker(t *testing.T) {
 	defer backend.Close()
 
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -287,7 +287,7 @@ func TestRegister_LogsResourceID(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "")
+		freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -324,7 +324,7 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 	defer backend.Close()
 
 	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -521,9 +521,9 @@ func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
 	require.True(t, deniedRes.IsError, "a non-alwaysOn tool must error under an unknown profile (G15 fail-closed)")
 }
 
-// TestCallTool_EmptyProfileEveryToolCallable verifies the fail-open path is
-// unchanged: with no profile set, every listed tool is also callable.
-func TestCallTool_EmptyProfileEveryToolCallable(t *testing.T) {
+// TestCallTool_EmptyProfileOnlyAlwaysOnCallable verifies an empty profile now
+// fails closed: only alwaysOn tools are callable, every other tool errors.
+func TestCallTool_EmptyProfileOnlyAlwaysOnCallable(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"room-1"}`))
@@ -537,6 +537,9 @@ func TestCallTool_EmptyProfileEveryToolCallable(t *testing.T) {
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
 
-	res := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
-	require.False(t, res.IsError, "empty profile must allow every tool to be called (fail-open, unchanged)")
+	okRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
+	require.False(t, okRes.IsError, "alwaysOn tools must remain callable with an empty profile")
+
+	deniedRes := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
+	require.True(t, deniedRes.IsError, "a non-alwaysOn tool must error with an empty profile (fail-closed)")
 }
