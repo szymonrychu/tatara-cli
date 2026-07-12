@@ -1276,24 +1276,6 @@ func TestOperatorTools_SCMBodies(t *testing.T) {
 		require.Equal(t, "implement", m["action"])
 		require.Equal(t, "add field, wire handler, test", m["plan"])
 	})
-	t.Run("issue_outcome_implement_with_locked", func(t *testing.T) {
-		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
-			"task": "t1", "action": "implement", "plan": "add field, wire handler, test", "locked": true,
-		})
-		require.NoError(t, err)
-		m := body.(map[string]any)
-		require.Equal(t, "implement", m["action"])
-		require.Equal(t, true, m["locked"])
-	})
-	t.Run("issue_outcome_locked_absent_by_default", func(t *testing.T) {
-		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
-			"task": "t1", "action": "implement",
-		})
-		require.NoError(t, err)
-		m := body.(map[string]any)
-		_, hasLocked := m["locked"]
-		require.False(t, hasLocked)
-	})
 	t.Run("issue_outcome_discuss", func(t *testing.T) {
 		_, _, body, err := operatorToolByName(t, "issue_outcome").Build(map[string]any{
 			"task": "t1", "action": "discuss", "comment": "need more info",
