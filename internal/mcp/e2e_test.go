@@ -53,7 +53,7 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	defer chat.Close()
 
 	srv := NewServer(freshClient(t, memory.URL), freshClient(t, operator.URL),
-		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)

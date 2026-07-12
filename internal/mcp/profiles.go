@@ -199,20 +199,19 @@ var profiles = map[string]profileSpec{
 }
 
 // resolveProfile returns the set of allowed tool names for the given profile.
-// Empty profile returns nil (fail-open: all tools allowed) - this is a documented,
-// separate case (e.g. local dev without TATARA_TOOL_PROFILE set) and is unchanged.
-// An unrecognized NON-EMPTY profile string fails CLOSED to the alwaysOn set only -
-// profile gating is the sole authz boundary (all agents share one OIDC identity),
-// so a typo'd/unknown profile must never silently grant the full tool surface.
-// A WARN is logged for both empty and unknown profiles.
+// Both an EMPTY profile and an unrecognized non-empty profile fail CLOSED to
+// the alwaysOn set only - profile gating is the sole authz boundary (all
+// agents share one OIDC identity), so a missing or typo'd profile must never
+// silently grant the full tool surface. A WARN is logged in both cases.
+// resolveProfile NEVER returns nil.
 func resolveProfile(profile string, log *slog.Logger) map[string]bool {
-	if profile == "" {
-		log.Warn("TATARA_TOOL_PROFILE not set; serving full tool set (fail-open)")
-		return nil
-	}
 	spec, ok := profiles[profile]
-	if !ok {
-		log.Warn("unknown TATARA_TOOL_PROFILE; failing closed to alwaysOn tools only", "profile", profile)
+	if profile == "" || !ok {
+		if profile == "" {
+			log.Warn("TATARA_TOOL_PROFILE not set; failing closed to alwaysOn tools only")
+		} else {
+			log.Warn("unknown TATARA_TOOL_PROFILE; failing closed to alwaysOn tools only", "profile", profile)
+		}
 		allow := make(map[string]bool)
 		for _, n := range alwaysOn {
 			allow[n] = true

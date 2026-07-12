@@ -2372,3 +2372,9 @@ func TestHarnessStateCAS_EmptyVersionAllowed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"value": "failure-modes", "version": ""}, body)
 }
+
+func TestChangeSummary_RemainingScopeSchemaWarnsIncomplete(t *testing.T) {
+	schema := string(operatorToolByName(t, "change_summary").Schema)
+	require.Contains(t, schema, "FAIL", "remaining_scope schema must warn that a non-empty value fails the task")
+	require.NotContains(t, schema, "follow-up", "remaining_scope schema must not describe follow-up-issue framing")
+}

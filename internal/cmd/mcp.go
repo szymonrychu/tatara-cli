@@ -173,7 +173,7 @@ func newMCPCmd() *cobra.Command {
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
 	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	c.Flags().String("metrics-addr", os.Getenv("TATARA_MCP_METRICS_ADDR"), "TCP address for the /metrics HTTP endpoint (e.g. 127.0.0.1:9090); empty disables it")
-	c.Flags().String("tool-profile", "", "MCP tool profile to serve (overrides TATARA_TOOL_PROFILE env); empty serves full set (fail-open)")
+	c.Flags().String("tool-profile", "", "MCP tool profile to serve (overrides TATARA_TOOL_PROFILE env); empty fails closed to the alwaysOn tool set")
 	return c
 }
 
