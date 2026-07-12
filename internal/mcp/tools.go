@@ -590,7 +590,7 @@ func OperatorTools() []Tool {
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/handover", body, nil
 			}),
 		op("issue_outcome", "Record the outcome of an issue-triage task: implement (open a PR), close (with a comment), or discuss (post questions/design notes as a comment).",
-			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"},"plan":{"type":"string","description":"When action=implement, a short description of WHAT will be implemented and HOW (flow, key ideas, approach). Posted to the issue as the implementation-start message."}},"required":["action"]}`,
+			`{"type":"object","properties":{"action":{"type":"string","enum":["implement","close","discuss"]},"comment":{"type":"string"},"plan":{"type":"string","description":"When action=implement, a short description of WHAT will be implemented and HOW (flow, key ideas, approach). Posted to the issue as the implementation-start message."},"locked":{"type":"boolean","description":"When action=implement, declare true ONLY when no open questions remain and every decision is settled. Read by the operator's systemic-group approval fan-out: approving one issue of a multi-issue task releases every OTHER member with locked=true too, without its own separate approval. Leave false (default) whenever anything is still uncertain."}},"required":["action"]}`,
 			func(a map[string]any) (string, string, any, error) {
 				tk := argOrEnv(a, "task", "TATARA_TASK")
 				if tk == "" {
@@ -605,6 +605,9 @@ func OperatorTools() []Tool {
 				}
 				if v, ok := a["plan"]; ok {
 					body["plan"] = v
+				}
+				if v, ok := a["locked"]; ok {
+					body["locked"] = v
 				}
 				return http.MethodPost, "/tasks/" + url.PathEscape(tk) + "/issue-outcome", body, nil
 			}),
