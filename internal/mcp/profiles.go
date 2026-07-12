@@ -181,6 +181,7 @@ var profiles = map[string]profileSpec{
 		handoff: true,
 		operator: []string{
 			"task_list", "task_update", "subtask_list", "subtask_create", "subtask_update",
+			"list_issues",
 			"propose_issue", "comment_on_issue", "change_summary", "decline_implementation", "submit_handover",
 			"harness_state_get", "harness_state_cas",
 		},

@@ -217,6 +217,17 @@ func TestIncidentProfile_HasChat(t *testing.T) {
 	assert.True(t, result["chat_create_room"], "incident must include chat")
 }
 
+// TestIncidentProfile_HasListIssues verifies the incident profile can survey
+// existing issues before propose_issue (dedup check), matching the refine
+// profile and the tatara-incident-sre / tatara-incident-investigation skills'
+// pre-propose_issue dedup step.
+func TestIncidentProfile_HasListIssues(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result := resolveProfile("incident", log)
+	require.NotNil(t, result)
+	assert.True(t, result["list_issues"], "incident must include list_issues for pre-propose_issue dedup survey")
+}
+
 func TestImplementProfile_NoChatNoTerminalDiscovery(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	result := resolveProfile("implement", log)
