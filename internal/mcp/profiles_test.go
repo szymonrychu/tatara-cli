@@ -31,13 +31,23 @@ func allRegisteredNames() map[string]bool {
 	return all
 }
 
-func TestResolveProfile_EmptyReturnsNil(t *testing.T) {
+func TestResolveProfile_EmptyFailsClosed(t *testing.T) {
 	var buf strings.Builder
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	result := resolveProfile("", log)
-	assert.Nil(t, result, "empty profile must return nil (fail-open)")
-	// should log a WARN
+	require.NotNil(t, result, "empty profile must fail closed to the tightest safe set, not nil")
 	assert.Contains(t, buf.String(), "level=WARN", "empty profile must log WARN")
+	assert.Equal(t, len(alwaysOn), len(result), "empty profile must be exactly the alwaysOn set")
+	for _, name := range alwaysOn {
+		assert.True(t, result[name], "empty profile must include alwaysOn tool %q", name)
+	}
+	for _, name := range []string{
+		"change_summary", "decline_implementation", "already_done", "submit_handover",
+		"review_verdict", "task_update", "subtask_create", "subtask_update",
+		"comment_on_issue", "create_issue", "close_issue", "edit_issue",
+	} {
+		assert.False(t, result[name], "empty profile must NOT grant %q", name)
+	}
 }
 
 func TestResolveProfile_UnknownFailsClosed(t *testing.T) {
