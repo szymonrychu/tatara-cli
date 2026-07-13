@@ -1,0 +1,5 @@
+{"type":"object","properties":{
+  "task":{"type":"string"},
+  "decision":{"type":"string","enum":["implement","close","discuss"]},
+  "reason":{"type":"string","description":"Required. For decision=implement, cite WHO approved and WHERE - the operator independently re-reads the thread and verifies both the identity AND the wording."}},
+ "required":["decision","reason"],"additionalProperties":false}

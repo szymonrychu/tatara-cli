@@ -83,7 +83,6 @@ func TestStatus_DefaultURLsAndProject(t *testing.T) {
 	out := runStatus(t)
 	require.Contains(t, out, client.DefaultBaseURL)
 	require.Contains(t, out, client.DefaultOperatorBaseURL)
-	require.Contains(t, out, client.DefaultChatBaseURL)
 	require.Contains(t, out, "Project:  (none)")
 	require.Contains(t, out, filepath.Join(dir, "tatara", "token.json"))
 }
@@ -96,12 +95,10 @@ func TestStatus_FlagsAndProjectOverrideURLs(t *testing.T) {
 	out := runStatus(t,
 		"--base-url", "https://mem.example",
 		"--operator-base-url", "https://op.example",
-		"--chat-base-url", "https://chat.example",
 		"--project", "proj1",
 	)
 	require.Contains(t, out, "Memory:   https://mem.example/proj1")
 	require.Contains(t, out, "Operator: https://op.example")
-	require.Contains(t, out, "Chat:     https://chat.example")
 	require.Contains(t, out, "Project:  proj1")
 }
 
@@ -111,12 +108,10 @@ func TestStatus_EnvOverridesURLs(t *testing.T) {
 	saveToken(t, dir, time.Now().Add(time.Hour))
 	t.Setenv("TATARA_MEMORY_URL", "https://mem.env")
 	t.Setenv("TATARA_OPERATOR_URL", "https://op.env")
-	t.Setenv("TATARA_CHAT_URL", "https://chat.env")
 
 	out := runStatus(t)
 	require.Contains(t, out, "Memory:   https://mem.env")
 	require.Contains(t, out, "Operator: https://op.env")
-	require.Contains(t, out, "Chat:     https://chat.env")
 }
 
 // A token that expires exactly now is already slightly in the past by the time

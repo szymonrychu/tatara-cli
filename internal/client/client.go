@@ -50,8 +50,8 @@ type Config struct {
 // X-Request-Id, so one agent turn is greppable across services. The wrapper
 // relaunches the agent per turn and injects TATARA_TURN_ID, so reading it once
 // at construction is correct. Falls back to RUN_ID (set for job-style runs),
-// else empty. The value is already valid for the memory and chat validators, so
-// no transform is applied.
+// else empty. The value is already valid for the memory and operator
+// validators, so no transform is applied.
 func correlationID() string {
 	if id := os.Getenv("TATARA_TURN_ID"); id != "" {
 		return id

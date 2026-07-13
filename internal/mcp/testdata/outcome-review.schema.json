@@ -1,0 +1,16 @@
+{"type":"object","properties":{
+  "task":{"type":"string"},
+  "verdict":{"type":"string","enum":["approve","request_changes"]},
+  "change_significance":{"type":"string","enum":["major","minor","patch"],
+    "description":"Optional. It may only RAISE the level the implementer declared, never lower it."},
+  "reviewed_shas":{"type":"array","minItems":1,"items":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},"sha":{"type":"string"}},
+    "required":["repo","number","sha"]},
+    "description":"REQUIRED. The head SHA you ACTUALLY CHECKED OUT AND READ, per MR. The operator re-reads the live head and REFUSES your verdict if it moved while you were reviewing - anything pushed after your checkout would otherwise merge unreviewed under your approval."},
+  "findings":{"type":"array","items":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},
+      "path":{"type":"string"},"line":{"type":"integer"},"body":{"type":"string"},
+      "severity":{"type":"string","enum":["critical","high","medium","low"]}},
+    "required":["repo","number","body","severity"]},
+    "description":"Required (>=1) when verdict=request_changes. The OPERATOR posts these as the SCM review and its inline comments - you do not post them yourself."}},
+ "required":["verdict","reviewed_shas"],"additionalProperties":false}

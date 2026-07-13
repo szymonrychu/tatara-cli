@@ -1,0 +1,12 @@
+{"type":"object","properties":{
+  "task":{"type":"string"},
+  "folds":{"type":"array","items":{"type":"object","properties":{"task":{"type":"string"}},
+    "required":["task"]},
+    "description":"Member Tasks to fold in: their Issues/MRs are adopted, then the member Task is deleted. A member with a running pod is REFUSED."},
+  "closes":{"type":"array","items":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},"reason":{"type":"string"}},
+    "required":["repo","number","reason"]}},
+  "links":{"type":"array","items":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},"isPR":{"type":"boolean"}},
+    "required":["repo","number"]}}},
+ "required":[],"additionalProperties":false}

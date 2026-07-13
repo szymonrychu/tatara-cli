@@ -56,9 +56,6 @@ func newStatusCmd() *cobra.Command {
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 
-			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
-			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
-
 			if project == "" {
 				project = "(none)"
 			}
@@ -66,12 +63,10 @@ func newStatusCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(out, "Token:    %s\n", tokenPath)
 			_, _ = fmt.Fprintf(out, "Memory:   %s\n", memBase)
 			_, _ = fmt.Fprintf(out, "Operator: %s\n", opBase)
-			_, _ = fmt.Fprintf(out, "Chat:     %s\n", chatBase)
 			return nil
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
-	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	return c
 }
 
