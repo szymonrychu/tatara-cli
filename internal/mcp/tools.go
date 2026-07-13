@@ -317,6 +317,14 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 		if err != nil {
 			return nil, fmt.Errorf("tatara: %s %s -> %d: read body: %w", method, path, resp.StatusCode, err)
 		}
+		// A 409 with reason=="head-moved" is not a failure: the operator already
+		// refreshed the mirror to the live head and wants the agent to re-review
+		// and resubmit. Render it as a normal tool result, not a tool error.
+		if resp.StatusCode == http.StatusConflict {
+			if msg, ok := headMovedGuidance(ebuf); ok {
+				return []byte(msg), nil
+			}
+		}
 		return nil, fmt.Errorf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(ebuf)))
 	}
 	// Success: read the full body. Tool results (graph queries, memory lists) are
@@ -332,3 +340,24 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 // error message, preventing a hostile or broken backend from forcing unbounded
 // memory use or multi-megabyte error strings.
 const errBodyCap = 4096
+
+// headMovedGuidance detects the operator's 409 reason=="head-moved" contract
+// (see tatara-operator /tasks/{t}/outcome) and returns the agent-facing
+// guidance message, appending the live SHA so the agent knows what to
+// re-review. Returns ok=false for any other body shape, so every other 4xx
+// (including a generic 409) stays a tool error.
+func headMovedGuidance(body []byte) (string, bool) {
+	var r struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+		LiveSHA string `json:"liveSHA"`
+	}
+	if json.Unmarshal(body, &r) != nil || r.Reason != "head-moved" {
+		return "", false
+	}
+	msg := r.Message
+	if r.LiveSHA != "" {
+		msg += "\n\nliveSHA: " + r.LiveSHA
+	}
+	return msg, true
+}
