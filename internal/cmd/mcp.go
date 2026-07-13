@@ -127,16 +127,8 @@ func newMCPCmd() *cobra.Command {
 				return err
 			}
 
-			chatBaseFlag, _ := cmd.Flags().GetString("chat-base-url")
-			chatBase := client.ResolveChatBaseURL(chatBaseFlag, os.Getenv("TATARA_CHAT_URL"), fileCfg)
-			chatCfg := client.Config{
-				BaseURL:   chatBase,
-				Token:     copyToken(token),
-				TokenPath: tokenPath,
-			}
-			wireCreds(&chatCfg)
-			chatCli, err := client.New(chatCfg)
-			if err != nil {
+			if err := mcp.CheckContractVersion(os.Getenv("TATARA_CONTRACT_VERSION")); err != nil {
+				logger.Error("refusing to start the MCP server", "action", "contract_mismatch", "error", err.Error())
 				return err
 			}
 
@@ -144,7 +136,7 @@ func newMCPCmd() *cobra.Command {
 			if toolProfile == "" {
 				toolProfile = os.Getenv("TATARA_TOOL_PROFILE")
 			}
-			srv := mcp.NewServer(cli, opCli, chatCli, logger, toolProfile)
+			srv := mcp.NewServer(cli, opCli, logger, toolProfile)
 
 			metricsAddr, _ := cmd.Flags().GetString("metrics-addr")
 			if metricsAddr != "" {
@@ -171,7 +163,6 @@ func newMCPCmd() *cobra.Command {
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
-	c.Flags().String("chat-base-url", "", "tatara-chat REST base URL (overrides TATARA_CHAT_URL and config file)")
 	c.Flags().String("metrics-addr", os.Getenv("TATARA_MCP_METRICS_ADDR"), "TCP address for the /metrics HTTP endpoint (e.g. 127.0.0.1:9090); empty disables it")
 	c.Flags().String("tool-profile", "", "MCP tool profile to serve (overrides TATARA_TOOL_PROFILE env); empty fails closed to the alwaysOn tool set")
 	return c

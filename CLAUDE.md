@@ -125,7 +125,7 @@ installed in the agent container and on PATH.
 ## CD (semver push-CD)
 
 - Every change declares significance. Agents set the required
-  `change_significance` field on `change_summary` (major = breaking,
+  `change_significance` field on `submit_outcome` (major = breaking,
   minor = feature, patch = fix/other). Humans set it via a
   `semver:<level>` label on the PR.
 - Agents NEVER merge PRs. The pipeline merges bot-authored PRs on green

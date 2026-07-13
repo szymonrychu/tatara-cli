@@ -45,17 +45,6 @@ the SCM-projects contract lock. See
 `~/Documents/tatara/docs/superpowers/plans/2026-06-09-scm-projects-cli.md`
 and spec `2026-06-09-scm-projects-pr-reactions-design.md`.
 
-## v0.6.0 - chat MCP tool group
-
-**Status:** code-complete 2026-06-12 (tatara-cli#24), pending tag + release.
-
-10 chat tools (chat_create_room, chat_list_rooms, chat_get_room,
-chat_close_room, chat_add_participant, chat_list_participants,
-chat_remove_participant, chat_send_message, chat_poll_messages,
-chat_get_log) mapping the tatara-chat REST API 1:1. Third client target
-(TargetChat); chat URL wiring via flag(--chat-base-url)/env(TATARA_CHAT_URL)/
-file(chatBaseUrl)/default. Single-token audience assumption as for operator.
-
 ## v0.7.0 - lifecycle notification params
 
 **Status:** code-complete 2026-06-13 (issue tatara-claude-code-wrapper#6).
@@ -69,6 +58,20 @@ to the operator, whose changeSummaryReq uses camelCase json tags with
 DisallowUnknownFields - so those fields were silently rejected and the MR fell
 back to the default title/body. Body keys are now camelCase to match the
 operator REST contract.
+
+## v1.0.0 - task-centric contract v4 (74 -> 20 tools)
+
+**Status:** shipped 2026-07-12.
+
+The MCP tool surface collapsed from 74 tools to exactly 20: `CodeTools()` 4,
+`MemoryTools()` 5, `SCMTools()` 3, `PlatformTools()` 7, `OutcomeTool(profile)`
+1 (`submit_outcome`, one name with a profile-shaped schema). `tools/list` went
+per-profile (contract D.6); `profiles.go` is rekeyed on the 7 agent kinds,
+fixing the live `clarify` P0. `tatara-chat` (chat/handoff MCP tools, the chat
+client, `TargetChat`, `--chat-base-url`, `TATARA_CHAT_URL`) is fully
+decommissioned - `task_note` is now the platform's only agent-to-agent
+channel. `tatara mcp` refuses to start on a `TATARA_CONTRACT_VERSION`
+mismatch. See `~/Documents/tatara-new/docs/superpowers/plans/2026-07-12-task-centric-cli.md`.
 
 ## v0.1.1 - follow-ups
 
@@ -88,3 +91,13 @@ operator REST contract.
   tatara-memory and tatara-operator backends (success, target dispatch,
   and backend-error result paths). Guards the 0.4.x tools/list
   marshalling class of regression that registration-only tests miss.
+- [open, cross-repo] `tatara-operator` must vendor
+  `internal/mcp/testdata/agent-kinds.txt` byte-identically into its own
+  `internal/agent/testdata/agent-kinds.txt` and add
+  `TestKindProfiles_MatchTheGolden` (or equivalent) checking its
+  `kindProfiles` map against that golden. The anti-drift golden in this
+  repo only catches drift if BOTH repos check it - the operator's half is
+  the half that failed last time (contract L.5: `pod.go` had a `clarify`
+  key, this repo's `profiles.go` did not, and `resolveProfile`'s
+  correct fail-closed behavior turned the gap into a live P0). Tracked as
+  an issue against `tatara-operator`, referencing contract G.9 and L.5.

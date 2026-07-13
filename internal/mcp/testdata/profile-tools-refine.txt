@@ -1,0 +1,13 @@
+issue_write
+memory_describe
+memory_query
+mr_write
+project_get
+repo_list
+report_internal_issue
+scm_read
+submit_outcome
+task_context
+task_get
+task_list
+task_note

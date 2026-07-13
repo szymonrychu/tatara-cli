@@ -173,27 +173,8 @@ func TestRaw_TargetOperatorNoProjectPrefix(t *testing.T) {
 	require.NoError(t, root.Execute())
 }
 
-func TestRaw_TargetChatNoProjectPrefix(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	writeToken(t, dir)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/rooms", r.URL.Path)
-		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-	t.Setenv("TATARA_CHAT_URL", srv.URL)
-
-	root := cmd.NewRootCmd()
-	root.SetArgs([]string{"--project", "proj", "raw", "--target", "chat", "GET", "/rooms"})
-	require.NoError(t, root.Execute())
-}
-
-// Finding 6 (old finding 2 updated): --operator-base-url and --chat-base-url
-// must apply to operator and chat targets respectively. Use the target-specific
-// flags; --base-url is memory-scoped.
+// Finding 6 (old finding 2 updated): --operator-base-url must apply to the
+// operator target. Use the target-specific flag; --base-url is memory-scoped.
 func TestRaw_BaseURLAppliedToOperatorTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -211,25 +192,6 @@ func TestRaw_BaseURLAppliedToOperatorTarget(t *testing.T) {
 	root.SetArgs([]string{"raw", "--target", "operator", "--operator-base-url", srv.URL, "GET", "/tasks"})
 	require.NoError(t, root.Execute())
 	require.True(t, hit, "--operator-base-url should route the operator target to the supplied URL")
-}
-
-func TestRaw_BaseURLAppliedToChatTarget(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	writeToken(t, dir)
-
-	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = true
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	root := cmd.NewRootCmd()
-	root.SetArgs([]string{"raw", "--target", "chat", "--chat-base-url", srv.URL, "GET", "/rooms"})
-	require.NoError(t, root.Execute())
-	require.True(t, hit, "--chat-base-url should route the chat target to the supplied URL")
 }
 
 // Finding 5: passing -d - when stdin is a non-TTY pipe must work (the happy-path
@@ -312,9 +274,9 @@ func TestRaw_BodyShapeUnused(t *testing.T) {
 	_, _ = json.Marshal(map[string]string{})
 }
 
-// Finding 6: --operator-base-url and --chat-base-url must be honoured by the
-// raw command (previously the flags were not registered so they were silently
-// ignored and the env-var or default was used instead).
+// Finding 6: --operator-base-url must be honoured by the raw command
+// (previously the flag was not registered so it was silently ignored and the
+// env-var or default was used instead).
 func TestRaw_OperatorBaseURLFlagHonoured(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -334,27 +296,6 @@ func TestRaw_OperatorBaseURLFlagHonoured(t *testing.T) {
 	root.SetArgs([]string{"raw", "--target", "operator", "--operator-base-url", srv.URL, "GET", "/tasks"})
 	require.NoError(t, root.Execute())
 	require.True(t, hit, "--operator-base-url must route the operator target to the supplied URL")
-}
-
-func TestRaw_ChatBaseURLFlagHonoured(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	writeToken(t, dir)
-
-	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = true
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	root := cmd.NewRootCmd()
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"raw", "--target", "chat", "--chat-base-url", srv.URL, "GET", "/rooms"})
-	require.NoError(t, root.Execute())
-	require.True(t, hit, "--chat-base-url must route the chat target to the supplied URL")
 }
 
 // Finding 2: when raw falls back to client-credentials (no stored token), the

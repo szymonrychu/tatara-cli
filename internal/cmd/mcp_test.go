@@ -31,6 +31,23 @@ func TestMCP_StartsWithoutToken(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestMCP_ContractMismatchExitsNonZero(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("OIDC_ISSUER", "")
+	t.Setenv("CLI_OIDC_CLIENT_ID", "")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "")
+	t.Setenv("TATARA_CONTRACT_VERSION", "1")
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"mcp"})
+	err := root.Execute()
+	require.Error(t, err, "an MCP server whose contract version does not match the operator must refuse to start")
+	require.Contains(t, err.Error(), "agent contract mismatch")
+}
+
 func TestMCP_RegisteredAsSubcommand(t *testing.T) {
 	root := cmd.NewRootCmd()
 	var found bool

@@ -1,0 +1,10 @@
+{"type":"object","properties":{
+  "task":{"type":"string"},
+  "action":{"type":"string","enum":["file_issue","false_positive"]},
+  "alert_rules":{"type":"array","minItems":1,"items":{"type":"string"}},
+  "issue":{"type":"object","properties":{
+      "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"}},
+    "required":["repo","title","body"],
+    "description":"Required when action=file_issue."},
+  "reason":{"type":"string"}},
+ "required":["action","alert_rules","reason"],"additionalProperties":false}

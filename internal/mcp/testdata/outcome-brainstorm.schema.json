@@ -1,0 +1,9 @@
+{"type":"object","properties":{
+  "task":{"type":"string"},
+  "action":{"type":"string","enum":["propose","skip"]},
+  "proposals":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{
+      "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
+      "kind":{"type":"string","enum":["bug","improvement"]}},
+    "required":["repo","title","body","kind"]}},
+  "reason":{"type":"string","description":"Required when action=skip."}},
+ "required":["action"],"additionalProperties":false}

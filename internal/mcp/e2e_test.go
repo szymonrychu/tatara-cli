@@ -16,8 +16,7 @@ import (
 
 // TestE2E_StdioProtocol drives the registered MCP server over the real
 // JSON-RPC protocol (in-process transport): initialize, tools/list, and
-// tools/call against faked tatara-memory, tatara-operator, and tatara-chat
-// backends.
+// tools/call against faked tatara-memory and tatara-operator backends.
 // This is the regression guard the API-level registration tests cannot give:
 // a tools/list marshalling break (see MEMORY.md, the 0.4.x bug) or a
 // dispatch/result mistake surfaces here, not just at the registry level.
@@ -44,16 +43,8 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	}))
 	defer operator.Close()
 
-	var chatMethod, chatPath string
-	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		chatMethod, chatPath = r.Method, r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"room-1","name":"impl"}`))
-	}))
-	defer chat.Close()
-
 	srv := NewServer(freshClient(t, memory.URL), freshClient(t, operator.URL),
-		freshClient(t, chat.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
+		slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
 
 	ctx := context.Background()
 	cli, err := mcpclient.NewInProcessClient(srv.srv)
@@ -69,23 +60,27 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "tatara", initRes.ServerInfo.Name)
 
-	// tools/list must expose every registered tool. This is the call that
-	// returned an error (and zero tools) under the 0.4.x marshalling bug.
+	// tools/list must expose exactly the brainstorm profile's allow-set. This is
+	// the call that returned an error (and zero tools) under the 0.4.x
+	// marshalling bug, and it is now per-profile (contract D.6).
 	listRes, err := cli.ListTools(ctx, mcplib.ListToolsRequest{})
 	require.NoError(t, err)
-	require.Len(t, listRes.Tools, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()))
+	require.Len(t, listRes.Tools, profileToolCounts["brainstorm"], "brainstorm registers exactly its 17-tool allow-set")
 
 	exposed := map[string]bool{}
 	for _, tl := range listRes.Tools {
 		exposed[tl.Name] = true
 	}
-	for _, want := range []string{"create_memory", "query", "code_search", "task_get", "propose_issue", "chat_create_room", "skip_research"} {
+	for _, want := range []string{"memory_write", "memory_query", "code_search", "task_get", "scm_read", "submit_outcome"} {
 		assert.Truef(t, exposed[want], "tools/list must expose %q", want)
+	}
+	for _, denied := range []string{"mr_write", "issue_write", "memory_edges"} {
+		assert.Falsef(t, exposed[denied], "brainstorm must NOT be offered %q (contract D.6)", denied)
 	}
 
 	// tools/call against the memory backend: routes to tatara-memory and the
 	// JSON body is returned as result text (the result-marshalling path).
-	memRes := callTool(ctx, t, cli, "create_memory", map[string]any{"text": "hello e2e"})
+	memRes := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello e2e"})
 	require.False(t, memRes.IsError)
 	assert.Equal(t, http.MethodPost, memMethod)
 	assert.Equal(t, "/memories", memPath)
@@ -99,13 +94,6 @@ func TestE2E_StdioProtocol(t *testing.T) {
 	opRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.False(t, opRes.IsError)
 	assert.Equal(t, "/tasks/task-x", opPath)
-
-	// tools/call against the chat backend: confirms target dispatch picks the
-	// chat client and routes to the chat REST surface.
-	chatRes := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
-	require.False(t, chatRes.IsError)
-	assert.Equal(t, http.MethodPost, chatMethod)
-	assert.Equal(t, "/rooms", chatPath)
 
 	// A backend error surfaces as an MCP error result, not a transport failure.
 	opFail = true

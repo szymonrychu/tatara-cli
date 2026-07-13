@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,21 +26,63 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
+// profileToolCounts is contract D.6's gating TABLE, counted (the always-on six,
+// plus the profile's granted tools, plus submit_outcome). D.6's prose SUMMARY
+// line under the table says 17/20/14/17/16/13/19; it is arithmetically wrong and
+// contradicts the table it summarises (incident is denied issue_write and
+// mr_write, so it cannot be 20 out of a 20-tool surface). The table is
+// normative; these are its counts.
+var profileToolCounts = map[string]int{
+	"brainstorm":    17,
+	"incident":      18,
+	"clarify":       14,
+	"implement":     16,
+	"review":        15,
+	"refine":        13,
+	"documentation": 18,
+}
+
+// readLines reads a golden file into a sorted slice, skipping blanks/comments.
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var out []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			out = append(out, line)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Every registered tool must marshal cleanly. mcp-go's NewTool seeds a default
 // object InputSchema; combined with a raw schema the tool has both InputSchema
 // and RawInputSchema set, which fails tools/list marshalling and leaves the
 // agent with zero tatara tools.
 func TestBuildTool_AllToolsMarshal(t *testing.T) {
-	all := append(AllTools(), OperatorTools()...)
-	all = append(all, ChatTools()...)
+	all := append(MemoryTools(), CodeTools()...)
 	all = append(all, PlatformTools()...)
+	all = append(all, SCMTools()...)
+	for _, p := range outcomeProfiles {
+		tl, ok := OutcomeTool(p)
+		require.Truef(t, ok, "profile %q must have a submit_outcome", p)
+		all = append(all, tl)
+	}
 	for _, tl := range all {
 		_, err := json.Marshal(buildTool(tl))
 		require.NoErrorf(t, err, "tool %s must marshal for tools/list", tl.Name)
 	}
 }
 
-func TestNewServer_RegistersAllTools(t *testing.T) {
+// staticToolCount is the whole candidate surface minus submit_outcome: the 19
+// tools a profile may draw from. It is no longer what any pod registers.
+func staticToolCount() int {
+	return len(MemoryTools()) + len(CodeTools()) + len(PlatformTools()) + len(SCMTools())
+}
+
+func TestToolGroups_AreTheNineteenStaticTools(t *testing.T) {
 	tok := &auth.Token{
 		AccessToken: "test",
 		ExpiresAt:   time.Now().Add(1 * time.Hour),
@@ -46,96 +91,89 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	c, err := client.New(client.Config{BaseURL: "http://localhost:9999", Token: tok})
 	require.NoError(t, err)
 
-	// Must not panic; all tools register without error. Empty profile = full set.
-	srv := NewServer(c, c, c, slog.Default(), "")
+	srv := NewServer(c, c, slog.Default(), "")
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
-	// After Part B: AllTools is 32 (not 34). After Part C: PlatformTools adds 1.
-	// After refine agent (E2): OperatorTools grows to 25.
-	// After harness_state tools (Task 3): OperatorTools grows to 27.
-	// Full count: AllTools(32) + OperatorTools(27) + ChatTools(10) + PlatformTools(1) + HandoffTools(4) = 74.
-	assert.Len(t, AllTools(), 32, "AllTools must be 32 after Part B merges")
+	// MemoryTools(5) + CodeTools(4) + PlatformTools(7) + SCMTools(3) = 19 static
+	// tools; the 20th is the profile's submit_outcome.
+	assert.Len(t, MemoryTools(), 5, "MemoryTools must be 5 after the memory fold")
+	assert.Equal(t, 19, staticToolCount(), "the static tool set is exactly 19")
 }
 
-func TestNewServer_EmptyProfileRegistersFullSet(t *testing.T) {
+func TestNewServer_RegistersOnlyTheProfilesTools(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
-	ch := freshClient(t, "http://chat.invalid")
-	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
-	expected := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools()) + len(HandoffTools())
-	require.Equal(t, expected, s.ToolCount(), "empty profile must register full set (%d tools)", expected)
-	require.Equal(t, 74, s.ToolCount(), "full tool count must be 74")
-}
-
-// Component 4a: tools/list must be byte-identical across profiles (a shared
-// prompt-cache prefix requires it), so registration no longer varies by
-// profile. Per-profile restriction now lives at call time (see
-// TestCallTool_* below), not at registration/list time.
-func TestNewServer_ProfileDoesNotReduceToolSet(t *testing.T) {
-	mem := freshClient(t, "http://memory.invalid")
-	op := freshClient(t, "http://operator.invalid")
-	ch := freshClient(t, "http://chat.invalid")
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	sImpl := NewServer(mem, op, ch, logger, "implement")
-	sLifecycle := NewServer(mem, op, ch, logger, "lifecycle")
-	sFull := NewServer(mem, op, ch, logger, "")
-
-	assert.Equal(t, sFull.ToolCount(), sImpl.ToolCount(),
-		"implement profile must register the same tool count as the full/empty-profile server")
-	assert.Equal(t, sFull.ToolCount(), sLifecycle.ToolCount(),
-		"lifecycle profile must register the same tool count as the full/empty-profile server")
-}
-
-func TestNewServer_ProfileCounts(t *testing.T) {
-	mem := freshClient(t, "http://memory.invalid")
-	op := freshClient(t, "http://operator.invalid")
-	ch := freshClient(t, "http://chat.invalid")
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	// Every known profile registers (lists) the exact full tool count -
-	// registration/tools-list no longer varies by profile.
-	fullCount := len(AllTools()) + len(OperatorTools()) + len(ChatTools()) + len(PlatformTools()) + len(HandoffTools())
-	for _, profile := range []string{"brainstorm", "implement", "review", "triage", "lifecycle", "incident", "selfImprove"} {
-		s := NewServer(mem, op, ch, logger, profile)
-		assert.Equal(t, fullCount, s.ToolCount(), "profile %q must register the full tool count", profile)
+	for _, kind := range AgentKinds() {
+		s := NewServer(mem, op, discardLogger(), kind)
+		require.Equal(t, profileToolCounts[kind], s.ToolCount(), "profile %q registers exactly its allow-set", kind)
+		require.Len(t, s.RegisteredNames(), profileToolCounts[kind])
+		require.Contains(t, s.RegisteredNames(), "submit_outcome", "every agent kind must be able to terminate its Task")
 	}
 }
 
-func TestNewServer_RefineProfileListsFullSetButRestrictsCalls(t *testing.T) {
-	mem := freshClient(t, "http://memory.invalid")
-	op := freshClient(t, "http://operator.invalid")
-	ch := freshClient(t, "http://chat.invalid")
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	sRefine := NewServer(mem, op, ch, logger, "refine")
-	sFull := NewServer(mem, op, ch, logger, "")
-	// refine still lists the full 74 tools (registration is profile-invariant);
-	// only the resolved allow-set (enforced at call time) is the 46-tool refine set.
-	assert.Equal(t, sFull.ToolCount(), sRefine.ToolCount(),
-		"refine profile must list the same tool count as the profile-invariant full registration")
-	assert.Len(t, sRefine.allow, 46, "refine profile's resolved allow-set must be exactly 46 tools")
-	assert.Len(t, sFull.allow, len(alwaysOn), "empty profile's resolved allow-set must be exactly the alwaysOn set (fail-closed)")
+func TestNewServer_EmptyProfileRegistersExactlySixTools(t *testing.T) {
+	s := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), discardLogger(), "")
+	require.Equal(t, 6, s.ToolCount(),
+		"fail closed: the always-on six, and NO submit_outcome")
+	require.NotContains(t, s.RegisteredNames(), "submit_outcome")
 }
 
-func TestNewServer_RegistersMemoryOperatorAndChatTools(t *testing.T) {
-	mem := freshClient(t, "http://memory.invalid")
-	op := freshClient(t, "http://operator.invalid")
-	ch := freshClient(t, "http://chat.invalid")
-	s := NewServer(mem, op, ch, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
-	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()), s.ToolCount())
+func TestNewServer_UnknownProfileRegistersExactlySixTools(t *testing.T) {
+	s := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), discardLogger(), "totally-bogus-unknown-profile")
+	require.Equal(t, 6, s.ToolCount(), "an unknown profile fails closed to the always-on six (G15)")
+	require.NotContains(t, s.RegisteredNames(), "submit_outcome")
 }
 
-func TestOperatorTools_SchemasAreValidJSON(t *testing.T) {
-	tools := OperatorTools()
-	require.Len(t, tools, 27)
-	for _, tl := range tools {
-		var v any
-		require.NoErrorf(t, json.Unmarshal(tl.Schema, &v), "operator tool %q has invalid JSON schema", tl.Name)
-		_, err := json.Marshal(buildTool(tl))
-		require.NoErrorf(t, err, "operator tool %q must marshal for tools/list", tl.Name)
+func TestNewServer_ToolsListIsNoLongerIdenticalAcrossProfiles(t *testing.T) {
+	// This asserts the DELIBERATE loss of the byte-identical-tools/list
+	// prompt-cache optimisation (design accepted risk 3). If this test ever
+	// starts failing because someone restored it, they have also restored the
+	// 74-tool list, and every agent is back to choosing between 68 tools it is
+	// not allowed to call.
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	a := NewServer(mem, op, discardLogger(), "clarify").RegisteredNames()
+	b := NewServer(mem, op, discardLogger(), "implement").RegisteredNames()
+	require.NotEqual(t, a, b)
+}
+
+func TestTotalToolSurfaceIsTwenty(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	names := map[string]bool{}
+	for _, kind := range AgentKinds() {
+		for _, n := range NewServer(mem, op, discardLogger(), kind).RegisteredNames() {
+			names[n] = true
+		}
 	}
+	require.Len(t, names, 20, "the union of every profile is exactly the 20-tool contract surface (contract D)")
+}
+
+func TestRegisteredToolGoldens(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+	for _, kind := range append(AgentKinds(), "") {
+		f := "empty"
+		if kind != "" {
+			f = kind
+		}
+		want := readLines(t, filepath.Join("testdata", "profile-tools-"+f+".txt"))
+		got := NewServer(mem, op, discardLogger(), kind).RegisteredNames()
+		sort.Strings(got)
+		require.Equal(t, want, got, "registered tools for profile %q", kind)
+	}
+}
+
+func TestNewServer_RefineAllowSetIsThirteen(t *testing.T) {
+	mem := freshClient(t, "http://memory.invalid")
+	op := freshClient(t, "http://operator.invalid")
+
+	sRefine := NewServer(mem, op, discardLogger(), "refine")
+	sEmpty := NewServer(mem, op, discardLogger(), "")
+	assert.Len(t, sRefine.allow, 13, "refine's resolved allow-set is 13 tools (contract D.6)")
+	assert.Equal(t, 13, sRefine.ToolCount(), "and it registers exactly those 13")
+	assert.Len(t, sEmpty.allow, len(alwaysOn), "empty profile's resolved allow-set must be exactly the alwaysOn set (fail-closed)")
 }
 
 // TestRegister_LogsInfoOnSuccess verifies that a successful tool call produces
@@ -150,33 +188,32 @@ func TestRegister_LogsInfoOnSuccess(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "brainstorm")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
-	cli, err := mcpclient.NewInProcessClient(srv.srv)
-	require.NoError(t, err)
-	defer func() { _ = cli.Close() }()
-	require.NoError(t, cli.Start(ctx))
+	cli := startClient(ctx, t, srv)
 
-	var initReq mcplib.InitializeRequest
-	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
-	_, err = cli.Initialize(ctx, initReq)
-	require.NoError(t, err)
-
-	var req mcplib.CallToolRequest
-	req.Params.Name = "create_memory"
-	req.Params.Arguments = map[string]any{"text": "hello"}
-	res, err := cli.CallTool(ctx, req)
-	require.NoError(t, err)
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
 	require.False(t, res.IsError)
 
 	logged := buf.String()
 	assert.Contains(t, logged, "tool call", "INFO log must say 'tool call'")
-	assert.Contains(t, logged, "create_memory", "INFO log must carry tool name")
+	assert.Contains(t, logged, "memory_write", "INFO log must carry tool name")
 	assert.Contains(t, logged, "duration_ms", "INFO log must carry duration_ms")
 	assert.Contains(t, logged, `"ok"`, "INFO log must carry status ok")
+}
+
+// TestNewServer_LogsResolvedSurface: the resolved tool surface is a business
+// action and is logged at INFO with the profile and the registered count.
+func TestNewServer_LogsResolvedSurface(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), logger, "clarify")
+
+	logged := buf.String()
+	assert.Contains(t, logged, "tools_registered", "startup must log the resolved surface")
+	assert.Contains(t, logged, "clarify")
+	assert.Contains(t, logged, `"count":14`)
 }
 
 // TestRegister_LogsErrorOnFailure verifies that a backend error produces an
@@ -190,45 +227,26 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "brainstorm")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
-	cli, err := mcpclient.NewInProcessClient(srv.srv)
-	require.NoError(t, err)
-	defer func() { _ = cli.Close() }()
-	require.NoError(t, cli.Start(ctx))
+	cli := startClient(ctx, t, srv)
 
-	var initReq mcplib.InitializeRequest
-	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
-	_, err = cli.Initialize(ctx, initReq)
-	require.NoError(t, err)
-
-	var req mcplib.CallToolRequest
-	req.Params.Name = "create_memory"
-	req.Params.Arguments = map[string]any{"text": "hello"}
-	res, err := cli.CallTool(ctx, req)
-	require.NoError(t, err) // protocol layer must not fail
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
 	require.True(t, res.IsError)
 
 	logged := buf.String()
 	assert.Contains(t, logged, "tool error", "ERROR log must say 'tool error'")
-	assert.Contains(t, logged, "create_memory", "ERROR log must carry tool name")
+	assert.Contains(t, logged, "memory_write", "ERROR log must carry tool name")
 }
 
 // TestRun_HonorsContext verifies that Server.Run accepts and wires the context
 // (finding #8: Run previously discarded ctx, preventing signal-cancellation).
-// The actual cancellation behaviour requires stdio pipes and is tested at the
-// integration level; here we verify the method signature and that a
-// pre-cancelled context causes Listen to return promptly.
 func TestRun_HonorsContext(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
-	srv := NewServer(mem, mem, mem, slog.New(slog.NewTextHandler(io.Discard, nil)), "")
+	srv := NewServer(mem, mem, discardLogger(), "")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
-	// Run with a cancelled context: Listen reads from a no-op reader and should
-	// return once the context is done. We pipe /dev/null as stdin so it doesn't block.
 	done := make(chan error, 1)
 	go func() { done <- srv.Run(ctx) }()
 	select {
@@ -248,26 +266,14 @@ func TestRegister_204ReturnsOKMarker(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
+	// incident, not brainstorm: memory_edges is only registered for incident and
+	// documentation (contract D.6).
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "incident")
 
 	ctx := context.Background()
-	cli, err := mcpclient.NewInProcessClient(srv.srv)
-	require.NoError(t, err)
-	defer func() { _ = cli.Close() }()
-	require.NoError(t, cli.Start(ctx))
+	cli := startClient(ctx, t, srv)
 
-	var initReq mcplib.InitializeRequest
-	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
-	_, err = cli.Initialize(ctx, initReq)
-	require.NoError(t, err)
-
-	var req mcplib.CallToolRequest
-	req.Params.Name = "delete_memory"
-	req.Params.Arguments = map[string]any{"id": "mem-123"}
-	res, err := cli.CallTool(ctx, req)
-	require.NoError(t, err)
+	res := callTool(ctx, t, cli, "memory_edges", map[string]any{"op": "delete", "id": "mem-123"})
 	require.False(t, res.IsError)
 	require.NotEmpty(t, res.Content, "tool result must not be empty for 204")
 	text := res.Content[0].(mcplib.TextContent).Text
@@ -276,7 +282,7 @@ func TestRegister_204ReturnsOKMarker(t *testing.T) {
 }
 
 // TestRegister_LogsResourceID verifies that the INFO log carries resource_id
-// extracted from the tool args (hard rule 12: structured fields including resource_id).
+// extracted from the tool args (hard rule 12).
 func TestRegister_LogsResourceID(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -286,27 +292,13 @@ func TestRegister_LogsResourceID(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "brainstorm")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), logger, "brainstorm")
 
 	ctx := context.Background()
-	cli, err := mcpclient.NewInProcessClient(srv.srv)
-	require.NoError(t, err)
-	defer func() { _ = cli.Close() }()
-	require.NoError(t, cli.Start(ctx))
+	cli := startClient(ctx, t, srv)
 
-	var initReq mcplib.InitializeRequest
-	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
-	_, err = cli.Initialize(ctx, initReq)
-	require.NoError(t, err)
-
-	// get_memory has an "id" arg — the canonical resource_id.
-	var req mcplib.CallToolRequest
-	req.Params.Name = "get_memory"
-	req.Params.Arguments = map[string]any{"id": "mem-42"}
-	res, err := cli.CallTool(ctx, req)
-	require.NoError(t, err)
+	// memory_entity op=get has an "id" arg - the canonical resource_id.
+	res := callTool(ctx, t, cli, "memory_entity", map[string]any{"op": "get", "id": "mem-42"})
 	require.False(t, res.IsError)
 
 	logged := buf.String()
@@ -323,30 +315,14 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), slog.New(slog.NewTextHandler(io.Discard, nil)), "brainstorm")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm")
 
 	ctx := context.Background()
-	cli, err := mcpclient.NewInProcessClient(srv.srv)
-	require.NoError(t, err)
-	defer func() { _ = cli.Close() }()
-	require.NoError(t, cli.Start(ctx))
+	cli := startClient(ctx, t, srv)
 
-	var initReq mcplib.InitializeRequest
-	initReq.Params.ProtocolVersion = mcplib.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcplib.Implementation{Name: "test", Version: "0"}
-	_, err = cli.Initialize(ctx, initReq)
-	require.NoError(t, err)
-
-	before := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "create_memory", "result": "ok"}))
-
-	var req mcplib.CallToolRequest
-	req.Params.Name = "create_memory"
-	req.Params.Arguments = map[string]any{"text": "hello"}
-	_, err = cli.CallTool(ctx, req)
-	require.NoError(t, err)
-
-	after := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "create_memory", "result": "ok"}))
+	before := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
+	_ = callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	after := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
 	assert.Equal(t, before+1, after, "ToolCallsTotal must increment on success")
 }
 
@@ -366,30 +342,41 @@ func startClient(ctx context.Context, t *testing.T, srv *Server) *mcpclient.Clie
 	return cli
 }
 
-// TestCallTool_NonAllowedToolReturnsAuthzErrorAndSkipsHandler verifies
-// Component 4a's call-time authz guard: a tool NOT in the resolved profile's
-// allow-set is still listed (tools/list is profile-invariant) but errors on
-// call, and the handler/backend is never actually reached.
-func TestCallTool_NonAllowedToolReturnsAuthzErrorAndSkipsHandler(t *testing.T) {
-	var chatHit bool
-	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		chatHit = true
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"room-1"}`))
-	}))
-	defer chat.Close()
+// requireNotCallable asserts a tool the profile does not hold cannot be invoked:
+// it is not registered, so the protocol layer rejects it (or, if a future change
+// ever registers it, the call-time allow check errors it).
+func requireNotCallable(ctx context.Context, t *testing.T, cli *mcpclient.Client, name string, args map[string]any) {
+	t.Helper()
+	var req mcplib.CallToolRequest
+	req.Params.Name = name
+	req.Params.Arguments = args
+	res, err := cli.CallTool(ctx, req)
+	if err == nil {
+		require.NotNil(t, res)
+		require.True(t, res.IsError, "tool %q is outside the profile and must not succeed", name)
+	}
+}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// "refine" has no chat tools in its allow-set.
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
-		freshClient(t, chat.URL), logger, "refine")
+// TestCallTool_NonRegisteredToolIsNotCallable: a tool outside the profile is not
+// registered at all, and the call-time allow check in register() stays as belt
+// and braces. All agents share one OIDC identity; this is the authz boundary.
+func TestCallTool_NonRegisteredToolIsNotCallable(t *testing.T) {
+	var opHit bool
+	op := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer op.Close()
+
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "clarify")
+	require.False(t, srv.allow["mr_write"], "clarify must not hold mr_write")
+	require.NotContains(t, srv.RegisteredNames(), "mr_write")
 
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
-
-	res := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
-	require.True(t, res.IsError, "a tool outside the profile's allow-set must return an authz error")
-	require.False(t, chatHit, "the backend must never be reached for a denied tool")
+	requireNotCallable(ctx, t, cli, "mr_write", map[string]any{"repo": "tatara-cli", "number": 80, "action": "comment", "body": "x"})
+	require.False(t, opHit, "the backend must never be reached for a tool outside the profile")
 }
 
 // TestCallTool_AlwaysOnToolCallableUnderAnyProfile verifies alwaysOn tools
@@ -401,9 +388,7 @@ func TestCallTool_AlwaysOnToolCallableUnderAnyProfile(t *testing.T) {
 	}))
 	defer operator.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, operator.URL),
-		freshClient(t, "http://chat.invalid"), logger, "refine")
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, operator.URL), discardLogger(), "refine")
 
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
@@ -412,92 +397,9 @@ func TestCallTool_AlwaysOnToolCallableUnderAnyProfile(t *testing.T) {
 	require.False(t, res.IsError, "an alwaysOn tool must be callable under any profile")
 }
 
-// TestCallTool_RefineCanDeleteHandoff verifies refine (the groomer) can call
-// delete_handoff at call time.
-func TestCallTool_RefineCanDeleteHandoff(t *testing.T) {
-	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer chat.Close()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
-		freshClient(t, chat.URL), logger, "refine")
-
-	ctx := context.Background()
-	cli := startClient(ctx, t, srv)
-
-	res := callTool(ctx, t, cli, "delete_handoff", map[string]any{"handoff_key": "k1"})
-	require.False(t, res.IsError, "refine must be able to call delete_handoff")
-}
-
-// TestCallTool_ImplementDeniedDeleteHandoffButAllowedWriteGetList verifies
-// implement can write/get/list handoffs but is denied delete_handoff
-// (groomer-only, refine).
-func TestCallTool_ImplementDeniedDeleteHandoffButAllowedWriteGetList(t *testing.T) {
-	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer chat.Close()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
-		freshClient(t, chat.URL), logger, "implement")
-
-	ctx := context.Background()
-	cli := startClient(ctx, t, srv)
-
-	deniedRes := callTool(ctx, t, cli, "delete_handoff", map[string]any{"handoff_key": "k1"})
-	require.True(t, deniedRes.IsError, "implement must be denied delete_handoff")
-
-	writeRes := callTool(ctx, t, cli, "write_handoff", map[string]any{"handoff_key": "k1", "project": "p1", "body": "b"})
-	require.False(t, writeRes.IsError, "implement must be allowed write_handoff")
-
-	getRes := callTool(ctx, t, cli, "get_handoff", map[string]any{"handoff_key": "k1"})
-	require.False(t, getRes.IsError, "implement must be allowed get_handoff")
-
-	listRes := callTool(ctx, t, cli, "list_handoffs", map[string]any{"project": "p1"})
-	require.False(t, listRes.IsError, "implement must be allowed list_handoffs")
-}
-
-// TestCallTool_NonHandoffProfileDeniedAllHandoffTools verifies a profile with
-// no continuity role (review) is denied all 4 handoff tools at call time.
-func TestCallTool_NonHandoffProfileDeniedAllHandoffTools(t *testing.T) {
-	var chatHit bool
-	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		chatHit = true
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer chat.Close()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"),
-		freshClient(t, chat.URL), logger, "review")
-
-	ctx := context.Background()
-	cli := startClient(ctx, t, srv)
-
-	for _, tc := range []struct {
-		tool string
-		args map[string]any
-	}{
-		{"write_handoff", map[string]any{"handoff_key": "k1", "project": "p1", "body": "b"}},
-		{"get_handoff", map[string]any{"handoff_key": "k1"}},
-		{"list_handoffs", map[string]any{"project": "p1"}},
-		{"delete_handoff", map[string]any{"handoff_key": "k1"}},
-	} {
-		res := callTool(ctx, t, cli, tc.tool, tc.args)
-		require.True(t, res.IsError, "review profile must be denied %q", tc.tool)
-	}
-	require.False(t, chatHit, "the backend must never be reached for any denied handoff tool")
-}
-
 // TestCallTool_UnknownProfileOnlyAlwaysOnCallable preserves G15: an unknown,
-// non-empty profile still fails closed to the alwaysOn set at call time -
-// every other tool is listed but errors when called.
+// non-empty profile fails closed to the alwaysOn set - nothing else is even
+// registered, and submit_outcome is absent, so the pod cannot terminate a Task.
 func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -505,11 +407,8 @@ func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "totally-bogus-unknown-profile")
-	require.Equal(t, len(AllTools())+len(OperatorTools())+len(ChatTools())+len(PlatformTools())+len(HandoffTools()), srv.ToolCount(),
-		"unknown profile must still list every tool")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "totally-bogus-unknown-profile")
+	require.Equal(t, 6, srv.ToolCount(), "unknown profile registers only the always-on six")
 
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
@@ -517,22 +416,20 @@ func TestCallTool_UnknownProfileOnlyAlwaysOnCallable(t *testing.T) {
 	okRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.False(t, okRes.IsError, "alwaysOn tools must remain callable under an unknown profile")
 
-	deniedRes := callTool(ctx, t, cli, "create_memory", map[string]any{"text": "hello"})
-	require.True(t, deniedRes.IsError, "a non-alwaysOn tool must error under an unknown profile (G15 fail-closed)")
+	requireNotCallable(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	requireNotCallable(ctx, t, cli, "submit_outcome", map[string]any{"task": "task-x"})
 }
 
-// TestCallTool_EmptyProfileOnlyAlwaysOnCallable verifies an empty profile now
-// fails closed: only alwaysOn tools are callable, every other tool errors.
+// TestCallTool_EmptyProfileOnlyAlwaysOnCallable: an empty profile fails closed
+// exactly like an unknown one.
 func TestCallTool_EmptyProfileOnlyAlwaysOnCallable(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"room-1"}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer backend.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL),
-		freshClient(t, backend.URL), logger, "")
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "")
 
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
@@ -540,6 +437,39 @@ func TestCallTool_EmptyProfileOnlyAlwaysOnCallable(t *testing.T) {
 	okRes := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.False(t, okRes.IsError, "alwaysOn tools must remain callable with an empty profile")
 
-	deniedRes := callTool(ctx, t, cli, "chat_create_room", map[string]any{"name": "impl"})
-	require.True(t, deniedRes.IsError, "a non-alwaysOn tool must error with an empty profile (fail-closed)")
+	requireNotCallable(ctx, t, cli, "mr_write", map[string]any{"repo": "tatara-cli", "number": 80, "action": "comment", "body": "x"})
+}
+
+// TestCallTool_RefineMRWriteIsCommentOnly is contract J, RESIDUE 1: refine holds
+// mr_write (so it IS registered and callable), but only for action=comment. The
+// gate is code, not schema, and it runs before Invoke - the backend is never
+// reached for a denied action.
+func TestCallTool_RefineMRWriteIsCommentOnly(t *testing.T) {
+	var opHits int
+	op := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer op.Close()
+
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "refine")
+	require.Contains(t, srv.RegisteredNames(), "mr_write", "refine holds mr_write (comment-only)")
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	openRes := callTool(ctx, t, cli, "mr_write", map[string]any{"repo": "tatara-cli", "action": "open", "title": "t", "body": "b", "project": "tatara"})
+	require.True(t, openRes.IsError, "refine may not open an MR")
+	require.Equal(t, 0, opHits, "the refine gate must run before Invoke")
+
+	commentRes := callTool(ctx, t, cli, "mr_write", map[string]any{"repo": "tatara-cli", "number": 80, "action": "comment", "body": "x", "project": "tatara"})
+	require.False(t, commentRes.IsError, "refine may comment on an MR")
+	require.Equal(t, 1, opHits)
+
+	// The gate is refine-only: implement opens MRs.
+	impl := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "implement")
+	implCli := startClient(ctx, t, impl)
+	implRes := callTool(ctx, t, implCli, "mr_write", map[string]any{"repo": "tatara-cli", "action": "open", "title": "t", "body": "b", "project": "tatara"})
+	require.False(t, implRes.IsError, "implement may open an MR")
 }
