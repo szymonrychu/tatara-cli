@@ -322,6 +322,68 @@ func TestOutcome_IncidentFalsePositiveForbidsIssue(t *testing.T) {
 	require.NoError(t, err, "action=false_positive with no issue must be accepted")
 }
 
+func TestOutcome_IncidentIssueParent(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("incident")
+	rules := []any{"tatara-operator-reconcile-errors"}
+	baseIssue := map[string]any{"repo": "tatara-operator", "title": "t", "body": "b"}
+
+	tests := []struct {
+		name    string
+		parent  any
+		wantErr bool
+	}{
+		{"valid_parent_ok", map[string]any{"repo": "tatara-operator", "number": float64(320)}, false},
+		{"missing_repo_errors", map[string]any{"number": float64(320)}, true},
+		{"empty_repo_errors", map[string]any{"repo": "", "number": float64(320)}, true},
+		{"missing_number_errors", map[string]any{"repo": "tatara-operator"}, true},
+		{"zero_number_errors", map[string]any{"repo": "tatara-operator", "number": float64(0)}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := map[string]any{}
+			for k, v := range baseIssue {
+				issue[k] = v
+			}
+			issue["parent"] = tt.parent
+			_, _, body, err := tl.Build(map[string]any{
+				"action": "file_issue", "alert_rules": rules, "reason": "real", "issue": issue,
+			})
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			raw, _ := json.Marshal(body)
+			var env struct {
+				Payload map[string]any `json:"payload"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &env))
+			issuePayload, _ := env.Payload["issue"].(map[string]any)
+			require.Contains(t, issuePayload, "parent")
+		})
+	}
+}
+
+func TestOutcome_IncidentNoParentStillOK(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("incident")
+	rules := []any{"tatara-operator-reconcile-errors"}
+
+	_, _, body, err := tl.Build(map[string]any{
+		"action": "file_issue", "alert_rules": rules, "reason": "real",
+		"issue": map[string]any{"repo": "tatara-operator", "title": "t", "body": "b"},
+	})
+	require.NoError(t, err, "action=file_issue with no issue.parent must still validate")
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	issuePayload, _ := env.Payload["issue"].(map[string]any)
+	require.NotContains(t, issuePayload, "parent")
+}
+
 func TestOutcome_RefineNeedsOneNonEmptyList(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
 	tl, _ := OutcomeTool("refine")
