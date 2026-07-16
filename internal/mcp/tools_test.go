@@ -444,6 +444,41 @@ func TestInvoke_AuthErrorGeneric(t *testing.T) {
 	}
 }
 
+// TestInvoke_HeadMovedIsNotAToolError verifies the operator's 409
+// reason=="head-moved" body is rendered as a normal (non-error) tool result
+// carrying the guidance message and liveSHA, since the operator already
+// refreshed the mirror and the agent just needs to re-review and resubmit.
+func TestInvoke_HeadMovedIsNotAToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"head-moved","repo":"org/repo","number":123,"reviewedSHA":"aaa","liveSHA":"bbb","mirrorRefreshed":true,"message":"The head of PR 123 moved. Re-sync your workspace (git fetch && git checkout bbb), re-review the new diff, and submit again."}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err, "head-moved 409 must not surface as a tool error")
+	assert.Contains(t, string(body), "Re-sync your workspace")
+	assert.Contains(t, string(body), "bbb", "guidance must carry the liveSHA")
+}
+
+// TestInvoke_GenericConflictStaysAToolError verifies a 409 without
+// reason=="head-moved" is unaffected by the head-moved carve-out and still
+// surfaces as a tool error.
+func TestInvoke_GenericConflictStaysAToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"some other conflict"}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.Error(t, err)
+	assert.Nil(t, body)
+	assert.Contains(t, err.Error(), "409")
+}
+
 // Finding #7: Body must be capped (not unlimited) on large error responses.
 func TestInvoke_ErrorBodyCapped(t *testing.T) {
 	large := strings.Repeat("x", 8192)
