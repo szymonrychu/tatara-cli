@@ -62,7 +62,11 @@ const incidentOutcomeSchema = `{"type":"object","properties":{
   "action":{"type":"string","enum":["file_issue","false_positive"]},
   "alert_rules":{"type":"array","minItems":1,"items":{"type":"string"}},
   "issue":{"type":"object","properties":{
-      "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"}},
+      "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
+      "parent":{"type":"object","properties":{
+          "repo":{"type":"string"},"number":{"type":"integer"}},
+        "required":["repo","number"],
+        "description":"Optional. Set ONLY when this new issue is genuinely-new-but-related to an existing open tracker you found while surveying - never for a same-rule duplicate (file false_positive or let admission dedup handle that instead). The operator links it as a sub-issue; you never file the link yourself."}},
     "required":["repo","title","body"],
     "description":"Required when action=file_issue."},
   "reason":{"type":"string"}},
@@ -105,7 +109,7 @@ var outcomeDescriptions = map[string]string{
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
 	"clarify":       "Finish this clarify task with a decision: implement, close or discuss, plus the reason. For decision=implement the reason must cite WHO approved and WHERE; the operator independently re-reads the thread and verifies both the identity and the wording.",
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, or action=skip with the reason nothing is worth proposing this cycle. A silent finish is not allowed.",
-	"incident":      "Finish this incident task. action=file_issue with the issue to open, or action=false_positive. Both require the alert_rules that fired and a reason.",
+	"incident":      "Finish this incident task. action=file_issue with the issue to open, or action=false_positive. Both require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
 }
 
@@ -292,6 +296,16 @@ func validateIncidentOutcome(a map[string]any) error {
 	for _, k := range []string{"repo", "title", "body"} {
 		if strings.TrimSpace(argString(issue, k)) == "" {
 			return fmt.Errorf("submit_outcome: issue.%s required when action=file_issue", k)
+		}
+	}
+	if parentRaw, ok := issue["parent"]; ok {
+		parent, _ := parentRaw.(map[string]any)
+		if strings.TrimSpace(argString(parent, "repo")) == "" {
+			return fmt.Errorf("submit_outcome: issue.parent.repo required (non-empty) when issue.parent is set")
+		}
+		n, err := asInt(parent["number"])
+		if err != nil || n <= 0 {
+			return fmt.Errorf("submit_outcome: issue.parent.number required (>0) when issue.parent is set")
 		}
 	}
 	return nil
