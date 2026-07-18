@@ -384,6 +384,75 @@ func TestOutcome_IncidentNoParentStillOK(t *testing.T) {
 	require.NotContains(t, issuePayload, "parent")
 }
 
+func TestOutcome_IncidentCommentIssue(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("incident")
+	rules := []any{"tatara-operator-reconcile-errors"}
+
+	_, _, body, err := tl.Build(map[string]any{
+		"action": "comment_issue", "alert_rules": rules, "reason": "same incident, fresh evidence",
+		"comment": map[string]any{"repo": "tatara-operator", "number": float64(291), "body": "still firing at 14:02 UTC"},
+	})
+	require.NoError(t, err, "valid comment_issue must be accepted")
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	commentPayload, _ := env.Payload["comment"].(map[string]any)
+	require.Equal(t, "tatara-operator", commentPayload["repo"])
+	require.Equal(t, float64(291), commentPayload["number"])
+	require.Equal(t, "still firing at 14:02 UTC", commentPayload["body"])
+}
+
+func TestOutcome_IncidentCommentIssueGates(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("incident")
+	rules := []any{"tatara-operator-reconcile-errors"}
+
+	t.Run("missing comment", func(t *testing.T) {
+		_, _, _, err := tl.Build(map[string]any{"action": "comment_issue", "alert_rules": rules, "reason": "same incident"})
+		require.Error(t, err, "action=comment_issue requires comment{repo,number,body}")
+	})
+
+	t.Run("number<=0", func(t *testing.T) {
+		_, _, _, err := tl.Build(map[string]any{
+			"action": "comment_issue", "alert_rules": rules, "reason": "same incident",
+			"comment": map[string]any{"repo": "tatara-operator", "number": float64(0), "body": "still firing"},
+		})
+		require.Error(t, err, "comment.number must be > 0")
+	})
+
+	t.Run("empty body", func(t *testing.T) {
+		_, _, _, err := tl.Build(map[string]any{
+			"action": "comment_issue", "alert_rules": rules, "reason": "same incident",
+			"comment": map[string]any{"repo": "tatara-operator", "number": float64(291), "body": "   "},
+		})
+		require.Error(t, err, "comment.body required (non-empty)")
+	})
+
+	t.Run("also sets issue", func(t *testing.T) {
+		_, _, _, err := tl.Build(map[string]any{
+			"action": "comment_issue", "alert_rules": rules, "reason": "same incident",
+			"comment": map[string]any{"repo": "tatara-operator", "number": float64(291), "body": "still firing"},
+			"issue":   map[string]any{"repo": "tatara-operator", "title": "t", "body": "b"},
+		})
+		require.Error(t, err, "action=comment_issue forbids issue")
+	})
+}
+
+func TestOutcome_IncidentFalsePositiveForbidsComment(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("incident")
+	rules := []any{"tatara-operator-reconcile-errors"}
+
+	_, _, _, err := tl.Build(map[string]any{
+		"action": "false_positive", "alert_rules": rules, "reason": "flapping threshold",
+		"comment": map[string]any{"repo": "tatara-operator", "number": float64(291), "body": "still firing"},
+	})
+	require.Error(t, err, "action=false_positive forbids comment")
+}
+
 func TestOutcome_RefineNeedsOneNonEmptyList(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
 	tl, _ := OutcomeTool("refine")
