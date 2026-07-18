@@ -1,6 +1,6 @@
 {"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["file_issue","false_positive"]},
+  "action":{"type":"string","enum":["file_issue","false_positive","comment_issue"]},
   "alert_rules":{"type":"array","minItems":1,"items":{"type":"string"}},
   "issue":{"type":"object","properties":{
       "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
@@ -10,5 +10,9 @@
         "description":"Optional. Set ONLY when this new issue is genuinely-new-but-related to an existing open tracker you found while surveying - never for a same-rule duplicate (file false_positive or let admission dedup handle that instead). The operator links it as a sub-issue; you never file the link yourself."}},
     "required":["repo","title","body"],
     "description":"Required when action=file_issue."},
+  "comment":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},"body":{"type":"string"}},
+    "required":["repo","number","body"],
+    "description":"Required when action=comment_issue. Appends fresh evidence as a comment on an existing OPEN incident tracker issue you found while surveying - use this when this alert is the SAME incident as that tracker, not a new problem."},
   "reason":{"type":"string"}},
  "required":["action","alert_rules","reason"],"additionalProperties":false}

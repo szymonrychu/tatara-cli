@@ -59,7 +59,7 @@ const brainstormOutcomeSchema = `{"type":"object","properties":{
 
 const incidentOutcomeSchema = `{"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["file_issue","false_positive"]},
+  "action":{"type":"string","enum":["file_issue","false_positive","comment_issue"]},
   "alert_rules":{"type":"array","minItems":1,"items":{"type":"string"}},
   "issue":{"type":"object","properties":{
       "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
@@ -69,6 +69,10 @@ const incidentOutcomeSchema = `{"type":"object","properties":{
         "description":"Optional. Set ONLY when this new issue is genuinely-new-but-related to an existing open tracker you found while surveying - never for a same-rule duplicate (file false_positive or let admission dedup handle that instead). The operator links it as a sub-issue; you never file the link yourself."}},
     "required":["repo","title","body"],
     "description":"Required when action=file_issue."},
+  "comment":{"type":"object","properties":{
+      "repo":{"type":"string"},"number":{"type":"integer"},"body":{"type":"string"}},
+    "required":["repo","number","body"],
+    "description":"Required when action=comment_issue. Appends fresh evidence as a comment on an existing OPEN incident tracker issue you found while surveying - use this when this alert is the SAME incident as that tracker, not a new problem."},
   "reason":{"type":"string"}},
  "required":["action","alert_rules","reason"],"additionalProperties":false}`
 
@@ -109,7 +113,7 @@ var outcomeDescriptions = map[string]string{
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
 	"clarify":       "Finish this clarify task with a decision: implement, close or discuss, plus the reason. For decision=implement the reason must cite WHO approved and WHERE; the operator independently re-reads the thread and verifies both the identity and the wording.",
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, or action=skip with the reason nothing is worth proposing this cycle. A silent finish is not allowed.",
-	"incident":      "Finish this incident task. action=file_issue with the issue to open, or action=false_positive. Both require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
+	"incident":      "Finish this incident task. action=file_issue with the issue to open, action=false_positive, or action=comment_issue with comment{repo,number,body} to append fresh evidence to an existing open tracker when this alert is the SAME incident as one you found while surveying. All three require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
 }
 
@@ -277,20 +281,43 @@ func validateBrainstormOutcome(a map[string]any) error {
 
 func validateIncidentOutcome(a map[string]any) error {
 	action := argString(a, "action")
-	if action != "file_issue" && action != "false_positive" {
-		return fmt.Errorf("submit_outcome: action required: one of file_issue|false_positive")
+	if action != "file_issue" && action != "false_positive" && action != "comment_issue" {
+		return fmt.Errorf("submit_outcome: action required: one of file_issue|false_positive|comment_issue")
 	}
 	if outcomeListLen(a, "alert_rules") == 0 {
-		return fmt.Errorf("submit_outcome: alert_rules required (>=1) on both actions")
+		return fmt.Errorf("submit_outcome: alert_rules required (>=1) on all actions")
 	}
 	if strings.TrimSpace(argString(a, "reason")) == "" {
-		return fmt.Errorf("submit_outcome: reason required (non-empty) on both actions")
+		return fmt.Errorf("submit_outcome: reason required (non-empty) on all actions")
+	}
+	if action == "comment_issue" {
+		if _, ok := a["issue"]; ok {
+			return fmt.Errorf("submit_outcome: issue is only for action=file_issue")
+		}
+		comment, _ := a["comment"].(map[string]any)
+		if strings.TrimSpace(argString(comment, "repo")) == "" {
+			return fmt.Errorf("submit_outcome: comment.repo required (non-empty) when action=comment_issue")
+		}
+		n, err := asInt(comment["number"])
+		if err != nil || n <= 0 {
+			return fmt.Errorf("submit_outcome: comment.number required (>0) when action=comment_issue")
+		}
+		if strings.TrimSpace(argString(comment, "body")) == "" {
+			return fmt.Errorf("submit_outcome: comment.body required (non-empty) when action=comment_issue")
+		}
+		return nil
 	}
 	if action != "file_issue" {
 		if _, ok := a["issue"]; ok {
 			return fmt.Errorf("submit_outcome: issue is only for action=file_issue")
 		}
+		if _, ok := a["comment"]; ok {
+			return fmt.Errorf("submit_outcome: comment is only for action=comment_issue")
+		}
 		return nil
+	}
+	if _, ok := a["comment"]; ok {
+		return fmt.Errorf("submit_outcome: comment is only for action=comment_issue")
 	}
 	issue, _ := a["issue"].(map[string]any)
 	for _, k := range []string{"repo", "title", "body"} {
