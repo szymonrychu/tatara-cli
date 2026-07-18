@@ -6,14 +6,32 @@
 # cluster secrets: harbor push auth is a per-build docker config on THIS runner,
 # the private-repo clone token is a buildkit frontend secret. Replaces
 # kaniko-build.sh.
+#
+# Second arg selects exactly ONE tag to push: `shortsha` (:SHORT_SHA, called
+# from ci.yml's image job) or `version` (:VERSION via git describe, called
+# from release.yml's release job after the semver tag has been cut). Both
+# workflows run on every push to main and used to push :SHORT_SHA in the same
+# buildctl call, so it landed in Harbor twice and the second push 412'd on
+# tag immutability. No default: an unset/unknown mode fails loudly instead of
+# silently reintroducing the double push.
 set -euo pipefail
 
 REPO="${1:?repo name required}"
+TAG_MODE="${2:?tag mode required: shortsha|version}"
 BUILDKITD_ADDR="tcp://buildkitd.arc-runners:1234"
 SHORT_SHA="${GITHUB_SHA:0:7}"
 VERSION="$(git describe --tags --always --dirty)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DEST="harbor.szymonrichert.pl/containers/${REPO}"
+
+case "$TAG_MODE" in
+  shortsha) TAG="$SHORT_SHA" ;;
+  version) TAG="$VERSION" ;;
+  *)
+    echo "build.sh: unknown tag mode '${TAG_MODE}' (expected shortsha|version)" >&2
+    exit 1
+    ;;
+esac
 
 : "${GITHUB_TOKEN:?GITHUB_TOKEN required}"
 : "${HARBOR_USERNAME:?HARBOR_USERNAME required}"
@@ -42,6 +60,6 @@ buildctl --addr "$BUILDKITD_ADDR" build \
   --opt build-arg:COMMIT="${SHORT_SHA}" \
   --opt build-arg:DATE="${BUILD_DATE}" \
   --secret id=GIT_AUTH_TOKEN,env=GITHUB_TOKEN \
-  --output "type=image,\"name=${DEST}:${SHORT_SHA},${DEST}:${VERSION}\",push=true"
+  --output "type=image,\"name=${DEST}:${TAG}\",push=true"
 
-echo "buildkit: pushed ${DEST}:${SHORT_SHA} and ${DEST}:${VERSION}"
+echo "buildkit: pushed ${DEST}:${TAG}"
