@@ -5,8 +5,12 @@ name: release
 #   1. cd-release tag    - read the merged PR's semver:<level> label, cut the
 #                          next git tag vX.Y.Z, push it.
 #   2. publish image     - build.sh re-runs with the tag present, so its
-#                          `git describe` resolves to vX.Y.Z and harbor gets
-#                          both :SHORT_SHA (traceability) and :vX.Y.Z (the pin).
+#                          `git describe` resolves to vX.Y.Z; build.sh is
+#                          called in `version` mode here and pushes ONLY
+#                          :vX.Y.Z. ci.yml's image job already pushed
+#                          :SHORT_SHA (traceability) for this commit in
+#                          `shortsha` mode - Harbor's tag immutability 412s
+#                          on a repeat push, so the two never overlap.
 #   3. cd-release bump   - rewrite the 3 wrapper build-arg pins (Dockerfile,
 #                          Makefile, build.sh) lockstep in ONE commit, open an
 #                          auto-merge PR labeled semver:patch.
@@ -77,7 +81,7 @@ jobs:
           mode: tag
           token: ${{ secrets.TATARA_CD_TOKEN }}
       - name: build and push image at vX.Y.Z
-        run: bash .github/ci/build.sh "${{ github.event.repository.name }}"
+        run: bash .github/ci/build.sh "${{ github.event.repository.name }}" version
       - name: bump wrapper pins
         uses: szymonrychu/tatara-helmfile/.github/actions/cd-release@main
         with:
