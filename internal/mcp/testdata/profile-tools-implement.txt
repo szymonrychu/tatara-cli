@@ -5,6 +5,7 @@ code_search
 memory_describe
 memory_query
 memory_write
+mr_takeover_request
 mr_write
 project_get
 repo_list

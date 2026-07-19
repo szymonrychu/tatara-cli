@@ -52,8 +52,8 @@ var profiles = map[string][]string{
 	"brainstorm":    {"task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity"},
 	"incident":      {"task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
 	"clarify":       {"scm_read", "issue_write", "code_search", "code_context", "code_explain", "memory_query", "memory_describe"},
-	"implement":     {"scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
-	"review":        {"scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
+	"implement":     {"scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
+	"review":        {"scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
 	"refine":        {"task_list", "scm_read", "issue_write", "mr_write", "memory_query", "memory_describe"},
 	"documentation": {"scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
 }

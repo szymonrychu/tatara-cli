@@ -2,13 +2,39 @@ package mcp
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestSCMTools_Count(t *testing.T) {
-	require.Len(t, SCMTools(), 3, "contract D.2: scm_read, issue_write, mr_write")
+	require.Len(t, SCMTools(), 4) // was 3; mr_takeover_request added
+}
+
+func TestMRTakeoverRequest_BuildsOperatorPost(t *testing.T) {
+	tl := toolByName(t, SCMTools(), "mr_takeover_request")
+	require.Equal(t, TargetOperator, tl.Target)
+	t.Setenv("TATARA_PROJECT", "proj-a")
+	t.Setenv("TATARA_TASK", "review-task")
+	method, path, body, err := tl.Build(map[string]any{
+		"repo": "repo-a", "number": 9, "comment_external_id": "10",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, method)
+	require.Equal(t, "/projects/proj-a/scm/mr-takeover", path)
+	m := body.(map[string]any)
+	require.Equal(t, "10", m["commentExternalId"])
+	require.Equal(t, "review-task", m["task"])
+	require.NotContains(t, m, "project") // project is in the path, stripped from body
+}
+
+func TestMRTakeoverRequest_RequiresCommentAndRepo(t *testing.T) {
+	tl := toolByName(t, SCMTools(), "mr_takeover_request")
+	_, _, _, err := tl.Build(map[string]any{"repo": "repo-a", "number": 9})
+	require.Error(t, err) // comment_external_id required
+	_, _, _, err = tl.Build(map[string]any{"comment_external_id": "10", "number": 9})
+	require.Error(t, err) // repo required
 }
 
 func TestSCMRead_KindPathMap(t *testing.T) {
