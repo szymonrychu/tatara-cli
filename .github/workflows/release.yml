@@ -82,6 +82,19 @@ jobs:
           token: ${{ secrets.TATARA_CD_TOKEN }}
       - name: build and push image at vX.Y.Z
         run: bash .github/ci/build.sh "${{ github.event.repository.name }}" version
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: publish tool manifest
+        # Machine-readable tool surface (names + enum fields) so agent-skills
+        # CI can lint skill-documented tool calls against the real schema
+        # instead of drifting silently. Attached to the same GitHub Release
+        # as the vX.Y.Z tag cut above.
+        run: |
+          mise exec -- go run ./cmd/tatara tool-manifest > tool-manifest.json
+          gh release view "${{ steps.tag.outputs.version }}" >/dev/null 2>&1 \
+            || gh release create "${{ steps.tag.outputs.version }}" --notes "tatara-cli ${{ steps.tag.outputs.version }}" --target "$GITHUB_SHA"
+          gh release upload "${{ steps.tag.outputs.version }}" tool-manifest.json --clobber
       - name: bump wrapper pins
         uses: szymonrychu/tatara-helmfile/.github/actions/cd-release@main
         with:
