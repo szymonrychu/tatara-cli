@@ -23,7 +23,7 @@ func scmNumber(a map[string]any) string {
 	return ""
 }
 
-// SCMTools returns the 3 forge tools (contract D.2). The agent pod has NO forge
+// SCMTools returns the 4 forge tools (contract D.2). The agent pod has NO forge
 // token and gh/glab are banned; these are its only view of, and only voice on,
 // the forge. scm_read(issues|mr|comments) is served from tatara's own CR mirror
 // of the forge - free, fast, at most one sweep stale. Only kind=ci leaves the
@@ -227,6 +227,38 @@ func SCMTools() []Tool {
 				}
 				body["task"] = argOrEnv(a, "task", "TATARA_TASK")
 				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/scm/mr-write", body, nil
+			},
+		},
+		{
+			Name:        "mr_takeover_request",
+			Description: "Request that the platform take ownership of an EXTERNAL merge request so it may push fixes and merge on approval. Call ONLY after you judge that a PROJECT MAINTAINER asked in natural language for tatara to take over. Pass the externalId of that exact comment (from scm_read(kind=comments, is_pr=true)). The operator RE-VALIDATES server-side: the comment must exist in the mirror and its author must be an allowed maintainer, never you. This is a REQUEST, not a merge - you never merge. On a non-maintainer or a misjudged comment the operator refuses and nothing changes.",
+			Target:      TargetOperator,
+			Schema: json.RawMessage(`{"type":"object","properties":{
+  "repo":{"type":"string"},"number":{"type":"integer"},
+  "comment_external_id":{"type":"string","description":"externalId of the maintainer's takeover comment from scm_read(kind=comments, is_pr=true)."}},
+ "required":["repo","number","comment_external_id"],"additionalProperties":false}`),
+			Build: func(a map[string]any) (string, string, any, error) {
+				repo := argString(a, "repo")
+				if repo == "" {
+					return "", "", nil, fmt.Errorf("repo required")
+				}
+				if _, ok := a["number"]; !ok {
+					return "", "", nil, fmt.Errorf("number required")
+				}
+				if argString(a, "comment_external_id") == "" {
+					return "", "", nil, fmt.Errorf("comment_external_id required")
+				}
+				p := argOrEnv(a, "project", "TATARA_PROJECT")
+				if p == "" {
+					return "", "", nil, fmt.Errorf("project required")
+				}
+				body := map[string]any{
+					"repo":              repo,
+					"number":            a["number"],
+					"commentExternalId": argString(a, "comment_external_id"),
+					"task":              argOrEnv(a, "task", "TATARA_TASK"),
+				}
+				return http.MethodPost, "/projects/" + url.PathEscape(p) + "/scm/mr-takeover", body, nil
 			},
 		},
 	}

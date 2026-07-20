@@ -10,7 +10,7 @@ func TestGenerateToolManifest(t *testing.T) {
 		byName[e.Name] = e
 	}
 
-	for _, want := range []string{"scm_read", "issue_write", "mr_write", "submit_outcome", "code_search", "memory_write"} {
+	for _, want := range []string{"scm_read", "issue_write", "mr_write", "mr_takeover_request", "submit_outcome", "code_search", "memory_write"} {
 		if _, ok := byName[want]; !ok {
 			t.Errorf("manifest missing tool %q", want)
 		}

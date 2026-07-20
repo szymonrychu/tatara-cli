@@ -97,14 +97,14 @@ func TestProfileGatingTable_IsContractD6Verbatim(t *testing.T) {
 		"brainstorm":    {"submit_outcome", "task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity"},
 		"incident":      {"submit_outcome", "task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
 		"clarify":       {"submit_outcome", "scm_read", "issue_write", "code_search", "code_context", "code_explain", "memory_query", "memory_describe"},
-		"implement":     {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
-		"review":        {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
+		"implement":     {"submit_outcome", "scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
+		"review":        {"submit_outcome", "scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
 		"refine":        {"submit_outcome", "task_list", "scm_read", "issue_write", "mr_write", "memory_query", "memory_describe"},
 		"documentation": {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
 	}
 	counts := map[string]int{
 		"brainstorm": 17, "incident": 18, "clarify": 14,
-		"implement": 16, "review": 15, "refine": 13, "documentation": 18,
+		"implement": 17, "review": 16, "refine": 13, "documentation": 18,
 	}
 	require.Len(t, table, len(profiles), "every agent kind has a row and every row is an agent kind")
 	for kind, extra := range table {

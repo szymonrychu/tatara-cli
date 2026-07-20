@@ -36,8 +36,8 @@ var profileToolCounts = map[string]int{
 	"brainstorm":    17,
 	"incident":      18,
 	"clarify":       14,
-	"implement":     16,
-	"review":        15,
+	"implement":     17,
+	"review":        16,
 	"refine":        13,
 	"documentation": 18,
 }
@@ -76,13 +76,13 @@ func TestBuildTool_AllToolsMarshal(t *testing.T) {
 	}
 }
 
-// staticToolCount is the whole candidate surface minus submit_outcome: the 19
+// staticToolCount is the whole candidate surface minus submit_outcome: the 20
 // tools a profile may draw from. It is no longer what any pod registers.
 func staticToolCount() int {
 	return len(MemoryTools()) + len(CodeTools()) + len(PlatformTools()) + len(SCMTools())
 }
 
-func TestToolGroups_AreTheNineteenStaticTools(t *testing.T) {
+func TestToolGroups_AreTheTwentyStaticTools(t *testing.T) {
 	tok := &auth.Token{
 		AccessToken: "test",
 		ExpiresAt:   time.Now().Add(1 * time.Hour),
@@ -95,10 +95,10 @@ func TestToolGroups_AreTheNineteenStaticTools(t *testing.T) {
 	assert.NotNil(t, srv)
 	assert.NotNil(t, srv.srv)
 
-	// MemoryTools(5) + CodeTools(4) + PlatformTools(7) + SCMTools(3) = 19 static
-	// tools; the 20th is the profile's submit_outcome.
+	// MemoryTools(5) + CodeTools(4) + PlatformTools(7) + SCMTools(4) = 20 static
+	// tools; the 21st is the profile's submit_outcome.
 	assert.Len(t, MemoryTools(), 5, "MemoryTools must be 5 after the memory fold")
-	assert.Equal(t, 19, staticToolCount(), "the static tool set is exactly 19")
+	assert.Equal(t, 20, staticToolCount(), "the static tool set is exactly 20")
 }
 
 func TestNewServer_RegistersOnlyTheProfilesTools(t *testing.T) {
@@ -138,7 +138,7 @@ func TestNewServer_ToolsListIsNoLongerIdenticalAcrossProfiles(t *testing.T) {
 	require.NotEqual(t, a, b)
 }
 
-func TestTotalToolSurfaceIsTwenty(t *testing.T) {
+func TestTotalToolSurfaceIsTwentyOne(t *testing.T) {
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
 	names := map[string]bool{}
@@ -147,7 +147,7 @@ func TestTotalToolSurfaceIsTwenty(t *testing.T) {
 			names[n] = true
 		}
 	}
-	require.Len(t, names, 20, "the union of every profile is exactly the 20-tool contract surface (contract D)")
+	require.Len(t, names, 21, "the union of every profile is exactly the 21-tool contract surface (contract D, +mr_takeover_request)")
 }
 
 func TestRegisteredToolGoldens(t *testing.T) {
