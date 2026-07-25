@@ -114,6 +114,24 @@ func TestStatus_EnvOverridesURLs(t *testing.T) {
 	require.Contains(t, out, "Operator: https://op.env")
 }
 
+// tatara-cli#88/#91: TATARA_MEMORY_URL is already project-scoped (one
+// root-mounted tatara-memory deployment per project), unlike --base-url or
+// the config file, so a --project flag must NOT get appended to it. Mirrors
+// TestRaw_TargetMemoryEnvSourcedBaseNotProjectPrefixed in raw_test.go so all
+// three call sites (mcp/raw/status) carry symmetric call-site coverage, not
+// just the shared resolver's unit tests.
+func TestStatus_EnvMemoryURLWithProjectNotPrefixed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	saveToken(t, dir, time.Now().Add(time.Hour))
+	t.Setenv("TATARA_MEMORY_URL", "https://mem.env")
+
+	out := runStatus(t, "--project", "proj")
+	require.Contains(t, out, "Memory:   https://mem.env")
+	require.NotContains(t, out, "https://mem.env/proj")
+	require.Contains(t, out, "Project:  proj")
+}
+
 // A token that expires exactly now is already slightly in the past by the time
 // expiryDesc runs. After the sign-before-rounding fix it must report "expired",
 // not "valid for 0s". A token expiring 1s in the future must still report "valid for".

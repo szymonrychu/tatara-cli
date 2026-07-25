@@ -50,8 +50,7 @@ func newStatusCmd() *cobra.Command {
 
 			baseFlag, _ := cmd.Flags().GetString("base-url")
 			project, _ := cmd.Flags().GetString("project")
-			memBase := client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
-			memBase = client.MemoryURLForProject(memBase, project)
+			memBase := client.ResolveMemoryURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg, project)
 
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)

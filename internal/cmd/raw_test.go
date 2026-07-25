@@ -155,6 +155,28 @@ func TestRaw_TargetMemoryAppliesProjectPrefix(t *testing.T) {
 	require.NoError(t, root.Execute())
 }
 
+// tatara-cli#88/#91: TATARA_MEMORY_URL is the operator-injected, already
+// project-scoped direct service endpoint (one root-mounted tatara-memory
+// deployment per project) - unlike --base-url/config-file/default, which are
+// the shared ingress endpoint and still need /<project> appended. Regression
+// for the fleet-wide 404 caused by appending the project twice.
+func TestRaw_TargetMemoryEnvSourcedBaseNotProjectPrefixed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/memories", r.URL.Path)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	t.Setenv("TATARA_MEMORY_URL", srv.URL)
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"--project", "proj", "raw", "--target", "memory", "GET", "/memories"})
+	require.NoError(t, root.Execute())
+}
+
 func TestRaw_TargetOperatorNoProjectPrefix(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
