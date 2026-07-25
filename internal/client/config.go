@@ -33,14 +33,38 @@ func ResolveBaseURL(flag, env string, file *FileConfig) string {
 	return DefaultBaseURL
 }
 
-// MemoryURLForProject composes the per-project memory base URL.
-// It trims a trailing slash from base, then appends /<project> when project is non-empty.
+// MemoryURLForProject composes the per-project memory base URL for an
+// ingress-shaped base (nginx rewrites /<project>/... and strips the prefix
+// before it reaches the pod). It trims a trailing slash from base, then
+// appends /<project> when project is non-empty. Only ResolveMemoryURL should
+// call this; a base sourced from TATARA_MEMORY_URL is already project-scoped
+// and must never be passed through it.
 func MemoryURLForProject(base, project string) string {
 	base = strings.TrimRight(base, "/")
 	if project == "" {
 		return base
 	}
 	return base + "/" + project
+}
+
+// ResolveMemoryURL resolves the final tatara-memory base URL callers should
+// use, already project-scoped. Precedence is flag > env > file > default,
+// same as ResolveBaseURL. TATARA_MEMORY_URL is injected per-project directly
+// by the operator as a root-mounted service endpoint (mem-<project>.<ns>.svc),
+// so a base sourced from env is already project-scoped and is returned as-is;
+// a base sourced from flag, file, or the default is the shared ingress
+// endpoint, which still needs /<project> appended for the ingress rewrite.
+func ResolveMemoryURL(flag, env string, file *FileConfig, project string) string {
+	if flag != "" {
+		return MemoryURLForProject(flag, project)
+	}
+	if env != "" {
+		return strings.TrimRight(env, "/")
+	}
+	if file != nil && file.BaseURL != "" {
+		return MemoryURLForProject(file.BaseURL, project)
+	}
+	return MemoryURLForProject(DefaultBaseURL, project)
 }
 
 // ResolveOperatorBaseURL returns the first non-empty of: flag, env, file, default.

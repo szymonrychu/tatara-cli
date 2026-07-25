@@ -42,9 +42,8 @@ func newRawCmd() *cobra.Command {
 			var base string
 			switch targetFlag {
 			case "memory":
-				base = client.ResolveBaseURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg)
 				project, _ := cmd.Flags().GetString("project")
-				base = client.MemoryURLForProject(base, project)
+				base = client.ResolveMemoryURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg, project)
 			case "operator":
 				base = client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			default:
