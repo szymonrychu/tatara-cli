@@ -217,7 +217,9 @@ func TestNewServer_LogsResolvedSurface(t *testing.T) {
 }
 
 // TestRegister_LogsErrorOnFailure verifies that a backend error produces an
-// ERROR log (not just a silent MCP error result).
+// ERROR log (not just a silent MCP error result). It uses an operator-target
+// tool: a 5xx from the MEMORY backend is a degraded subsystem, not a tool
+// error, and takes the MEMORY_DEGRADED path instead (see degraded_test.go).
 func TestRegister_LogsErrorOnFailure(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -232,12 +234,12 @@ func TestRegister_LogsErrorOnFailure(t *testing.T) {
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
 
-	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	res := callTool(ctx, t, cli, "task_get", map[string]any{"task": "task-x"})
 	require.True(t, res.IsError)
 
 	logged := buf.String()
 	assert.Contains(t, logged, "tool error", "ERROR log must say 'tool error'")
-	assert.Contains(t, logged, "memory_write", "ERROR log must carry tool name")
+	assert.Contains(t, logged, "task_get", "ERROR log must carry tool name")
 }
 
 // TestRun_HonorsContext verifies that Server.Run accepts and wires the context

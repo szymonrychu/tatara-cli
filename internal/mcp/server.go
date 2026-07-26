@@ -30,6 +30,9 @@ type Server struct {
 	// registration (tools outside it are never listed) and, as belt and
 	// braces, execution in the register() dispatch closure.
 	allow map[string]bool
+	// mem tracks whether the memory backend is usable, so every TargetMemory
+	// tool can answer with guidance instead of a bare transport error.
+	mem *memoryState
 }
 
 // NewServer builds the stdio MCP server for one agent pod.
@@ -52,6 +55,11 @@ type Server struct {
 //
 // profile is read from TATARA_TOOL_PROFILE env (or --tool-profile flag) and
 // passed in by the caller.
+//
+// memory may be nil: a pod with TATARA_MEMORY_URL set but empty has no memory
+// backend at all. The nine TargetMemory tools are still registered in that case
+// (the surface stays stable, and the agent needs them to see what it lost and
+// report it); they answer with the MEMORY_DEGRADED guidance and never dispatch.
 func NewServer(memory, operator *client.Client, log *slog.Logger, profile string) *Server {
 	allow := resolveProfile(profile, log)
 	s := &Server{
@@ -61,6 +69,11 @@ func NewServer(memory, operator *client.Client, log *slog.Logger, profile string
 		log:      log,
 		profile:  profile,
 		allow:    allow,
+		mem:      newMemoryState(memory != nil),
+	}
+	if reason, ok := s.mem.degraded(); ok {
+		log.Warn("tatara-memory is degraded; memory tools will return guidance instead of calling it",
+			"action", "memory_degraded", "reason", reason)
 	}
 
 	candidates := CodeTools()
@@ -176,10 +189,29 @@ func (s *Server) register(t Tool) {
 			return mcplib.NewToolResultText(result), nil
 		}
 
+		// A memory backend we already know is down is not called again: the
+		// agent gets the guidance immediately instead of one request timeout
+		// per tool call. Placed after the Handler branch on purpose -
+		// report_internal_issue carries the zero-value Target (TargetMemory)
+		// but runs locally, and the guidance tells the agent to call it.
+		if t.Target == TargetMemory {
+			if reason, ok := s.mem.degraded(); ok {
+				elapsedMs := float64(time.Since(start).Milliseconds())
+				obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
+				return s.degradedResult(t.Name, reason, rid, elapsedMs), nil
+			}
+		}
+
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		elapsedMs := float64(time.Since(start).Milliseconds())
 		obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
 		if err != nil {
+			// A transport failure or 5xx against memory latches: the outage
+			// started mid-turn, and every later memory call is answered from
+			// the latch. A 4xx does not latch and stays a tool error.
+			if t.Target == TargetMemory && memoryBackendDown(err) {
+				return s.degradedResult(t.Name, s.mem.latch(err), rid, elapsedMs), nil
+			}
 			obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
 			s.log.Error("tool error", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "resource_id", rid, "err", err)
 			return mcplib.NewToolResultError(err.Error()), nil
@@ -196,6 +228,18 @@ func (s *Server) register(t Tool) {
 		}
 		return mcplib.NewToolResultText(string(body)), nil
 	})
+}
+
+// degradedResult renders the MEMORY_DEGRADED guidance as a normal tool result,
+// following the head-moved carve-out in Invoke: the agent is being told what to
+// do next, not that it made a mistake, and the operator's prompt guidance
+// already says to carry on with reduced recall.
+// The caller observes ToolCallDurationMs; this only counts the outcome.
+func (s *Server) degradedResult(tool, reason, rid string, elapsedMs float64) *mcplib.CallToolResult {
+	obs.ToolCallsTotal.WithLabelValues(tool, "degraded").Inc()
+	s.log.Warn("memory tool answered from the degraded path",
+		"tool", tool, "duration_ms", elapsedMs, "resource_id", rid, "reason", reason)
+	return mcplib.NewToolResultText(s.mem.report(tool, reason))
 }
 
 // Run starts the stdio MCP server. It blocks until stdin closes or ctx is cancelled.

@@ -76,7 +76,8 @@ func newMCPCmd() *cobra.Command {
 				return err
 			}
 			project, _ := cmd.Flags().GetString("project")
-			base := client.ResolveMemoryURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg, project)
+			memEnv, memEnvSet := os.LookupEnv("TATARA_MEMORY_URL")
+			base := client.ResolveMemoryURL(baseFlag, memEnv, memEnvSet, fileCfg, project)
 
 			token, tokenPath, ccRefresh := resolveMCPToken(ctx, logger)
 
@@ -102,15 +103,24 @@ func newMCPCmd() *cobra.Command {
 				}
 			}
 
-			cliCfg := client.Config{
-				BaseURL:   base,
-				Token:     copyToken(token),
-				TokenPath: tokenPath,
-			}
-			wireCreds(&cliCfg)
-			cli, err := client.New(cliCfg)
-			if err != nil {
-				return err
+			// No memory base URL resolved: this pod has no memory backend
+			// (TATARA_MEMORY_URL set but empty). Start anyway with a nil memory
+			// client - the memory tools stay listed and answer MEMORY_DEGRADED.
+			var cli *client.Client
+			if base == "" {
+				logger.Warn("no memory backend configured; memory tools will return MEMORY_DEGRADED",
+					"action", "memory_unconfigured", "env", "TATARA_MEMORY_URL")
+			} else {
+				cliCfg := client.Config{
+					BaseURL:   base,
+					Token:     copyToken(token),
+					TokenPath: tokenPath,
+				}
+				wireCreds(&cliCfg)
+				cli, err = client.New(cliCfg)
+				if err != nil {
+					return err
+				}
 			}
 
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")

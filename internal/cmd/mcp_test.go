@@ -147,3 +147,22 @@ func TestMCP_MetricsAddrExposesEndpoint(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	require.Contains(t, string(body), "go_", "/metrics must contain Prometheus output")
 }
+
+// A pod with no memory stack gets TATARA_MEMORY_URL set but empty. The MCP
+// server must still start (its memory tools stay listed and answer
+// MEMORY_DEGRADED) rather than failing on a missing base URL - and it must not
+// silently fall back to the shared public memory endpoint.
+func TestMCP_StartsWithEmptyMemoryURL(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("OIDC_ISSUER", "")
+	t.Setenv("CLI_OIDC_CLIENT_ID", "")
+	t.Setenv("CLI_OIDC_CLIENT_SECRET", "")
+	t.Setenv("TATARA_MEMORY_URL", "")
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"mcp"})
+	require.NoError(t, root.Execute())
+}

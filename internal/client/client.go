@@ -20,6 +20,17 @@ import (
 // RefreshFunc is called when the current token is about to expire.
 type RefreshFunc func(ctx context.Context, t *auth.Token) (*auth.Token, error)
 
+// TransportError marks a failure that happened on the wire: the request left
+// this process and no response came back (connection refused, DNS failure,
+// timeout, reset). It exists so callers can tell "the backend is not there"
+// from the other errors Do returns - a missing token, a failed refresh, an
+// unencodable body - which say nothing about the backend's health. Error()
+// delegates, so error strings are unchanged.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string { return e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
 // Client is an HTTP client that attaches bearer tokens and auto-refreshes on near-expiry.
 type Client struct {
 	mu        sync.Mutex
@@ -144,7 +155,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.R
 			"error", err,
 		)
 	}
-	return resp, err
+	if err != nil {
+		return nil, &TransportError{Err: err}
+	}
+	return resp, nil
 }
 
 // statusCode returns the HTTP status code from resp, or 0 when resp is nil.

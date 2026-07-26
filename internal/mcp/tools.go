@@ -310,12 +310,14 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 		// so the connection can be reused.
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errBodyCap))
-			return nil, fmt.Errorf("tatara: %s %s -> %d: authentication/authorization failed", method, path, resp.StatusCode)
+			return nil, &statusError{resp.StatusCode,
+				fmt.Sprintf("tatara: %s %s -> %d: authentication/authorization failed", method, path, resp.StatusCode)}
 		}
 		// Cap the error body to keep error strings (and memory) bounded.
 		ebuf, err := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
 		if err != nil {
-			return nil, fmt.Errorf("tatara: %s %s -> %d: read body: %w", method, path, resp.StatusCode, err)
+			return nil, &statusError{resp.StatusCode,
+				fmt.Sprintf("tatara: %s %s -> %d: read body: %v", method, path, resp.StatusCode, err)}
 		}
 		// A 409 with reason=="head-moved" is not a failure: the operator already
 		// refreshed the mirror to the live head and wants the agent to re-review
@@ -325,7 +327,8 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 				return []byte(msg), nil
 			}
 		}
-		return nil, fmt.Errorf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(ebuf)))
+		return nil, &statusError{resp.StatusCode,
+			fmt.Sprintf("tatara: %s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(ebuf)))}
 	}
 	// Success: read the full body. Tool results (graph queries, memory lists) are
 	// routinely larger than the error cap and must not be truncated.
@@ -335,6 +338,16 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 	}
 	return buf, nil
 }
+
+// statusError is an Invoke failure that carries the backend's HTTP status code,
+// so a caller can tell a 5xx (the backend is broken) from a 4xx (the request
+// was). Error() renders exactly what the plain fmt.Errorf used to.
+type statusError struct {
+	code int
+	msg  string
+}
+
+func (e *statusError) Error() string { return e.msg }
 
 // errBodyCap bounds how many bytes of an error response body we read into an
 // error message, preventing a hostile or broken backend from forcing unbounded

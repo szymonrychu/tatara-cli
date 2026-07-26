@@ -80,6 +80,23 @@ Every profile also gets the always-on six on top of the columns above.
 (contract J, RESIDUE 1) - the schema is shared, so that gate lives in
 `checkRefineMRWrite`, enforced identically server-side.
 
+### Degraded memory subsystem
+
+The nine memory-backed tools (the 5 `memory_*` plus the 4 `code_*`) answer
+with a structured `MEMORY_DEGRADED` result instead of a raw transport error
+when tatara-memory is unusable. It triggers on either `TATARA_MEMORY_DEGRADED=true`
+(tatara-operator sets it when it spawns a pod against an unhealthy memory) or
+an in-process latch set by the first transport failure or 5xx seen mid-turn. A
+4xx never latches - that is a bad request, not an outage - and keeps its normal
+tool error. The full guidance is emitted once, then a short form, and the tool
+surface never changes: the tools stay listed so the agent can report the loss
+and carry on with reduced recall.
+
+`TATARA_MEMORY_URL` set but EMPTY means "this pod has no memory backend" and
+resolves to no client at all (also `MEMORY_DEGRADED`), never to the shared
+public endpoint. Unset is different: it keeps the config-file/default fallback
+a workstation needs.
+
 ## Build from source
 
 ```sh

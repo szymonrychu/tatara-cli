@@ -43,7 +43,11 @@ func newRawCmd() *cobra.Command {
 			switch targetFlag {
 			case "memory":
 				project, _ := cmd.Flags().GetString("project")
-				base = client.ResolveMemoryURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg, project)
+				memEnv, memEnvSet := os.LookupEnv("TATARA_MEMORY_URL")
+				base = client.ResolveMemoryURL(baseFlag, memEnv, memEnvSet, fileCfg, project)
+				if base == "" {
+					return fmt.Errorf("raw: no memory backend configured (TATARA_MEMORY_URL is set but empty); pass --base-url to target one explicitly")
+				}
 			case "operator":
 				base = client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			default:
