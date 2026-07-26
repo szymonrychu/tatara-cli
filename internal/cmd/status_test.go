@@ -200,3 +200,17 @@ func runStatus(t *testing.T, args ...string) string {
 	require.NoError(t, root.Execute())
 	return out.String()
 }
+
+// Symmetric with TestRaw_EmptyMemoryURLIsNotThePublicDefault and
+// TestMCP_StartsWithEmptyMemoryURL: status must report the pod as having no
+// memory backend, never the shared public default.
+func TestStatus_EmptyMemoryURLReportsNotConfigured(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	saveToken(t, dir, time.Now().Add(time.Hour))
+	t.Setenv("TATARA_MEMORY_URL", "")
+
+	out := runStatus(t)
+	require.Contains(t, out, "not configured")
+	require.NotContains(t, out, client.DefaultBaseURL)
+}

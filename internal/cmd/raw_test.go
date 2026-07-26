@@ -360,3 +360,18 @@ func TestRaw_CCTokenHasExpiry(t *testing.T) {
 	require.NoError(t, root.Execute())
 	require.Equal(t, "Bearer cc-access-tok", gotAuth, "cc token must be forwarded in Authorization header")
 }
+
+// A set-but-empty TATARA_MEMORY_URL means "no memory backend configured". raw
+// must say so instead of falling through to the shared public endpoint.
+func TestRaw_EmptyMemoryURLIsNotThePublicDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	writeToken(t, dir)
+	t.Setenv("TATARA_MEMORY_URL", "")
+
+	root := cmd.NewRootCmd()
+	root.SetArgs([]string{"raw", "--target", "memory", "GET", "/memories"})
+	err := root.Execute()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no memory backend configured")
+}

@@ -55,12 +55,22 @@ func memoryURLForProject(base, project string) string {
 // so a base sourced from env is already project-scoped and is returned as-is;
 // a base sourced from flag, file, or the default is the shared ingress
 // endpoint, which still needs /<project> appended for the ingress rewrite.
-func ResolveMemoryURL(flag, env string, file *FileConfig, project string) string {
+//
+// envSet is os.LookupEnv's second return. An env var that is SET BUT EMPTY
+// means "this pod has no memory backend" and resolves to "", which callers must
+// treat as unconfigured; it must never fall through to the shared public
+// default, or a project with no memory stack silently makes cross-cluster calls
+// into someone else's memory. UNSET is a different thing entirely - a developer
+// workstation with no tatara env at all - and keeps the file/default fallback.
+func ResolveMemoryURL(flag, env string, envSet bool, file *FileConfig, project string) string {
 	if flag != "" {
 		return memoryURLForProject(flag, project)
 	}
 	if env != "" {
 		return strings.TrimRight(env, "/")
+	}
+	if envSet {
+		return ""
 	}
 	if file != nil && file.BaseURL != "" {
 		return memoryURLForProject(file.BaseURL, project)

@@ -50,7 +50,11 @@ func newStatusCmd() *cobra.Command {
 
 			baseFlag, _ := cmd.Flags().GetString("base-url")
 			project, _ := cmd.Flags().GetString("project")
-			memBase := client.ResolveMemoryURL(baseFlag, os.Getenv("TATARA_MEMORY_URL"), fileCfg, project)
+			memEnv, memEnvSet := os.LookupEnv("TATARA_MEMORY_URL")
+			memBase := client.ResolveMemoryURL(baseFlag, memEnv, memEnvSet, fileCfg, project)
+			if memBase == "" {
+				memBase = "(not configured: TATARA_MEMORY_URL is set but empty)"
+			}
 
 			opBaseFlag, _ := cmd.Flags().GetString("operator-base-url")
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
