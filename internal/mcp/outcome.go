@@ -49,12 +49,12 @@ const clarifyOutcomeSchema = `{"type":"object","properties":{
 
 const brainstormOutcomeSchema = `{"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["propose","skip"]},
+  "action":{"type":"string","enum":["propose","skip","exhausted"]},
   "proposals":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{
       "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
       "kind":{"type":"string","enum":["bug","improvement"]}},
     "required":["repo","title","body","kind"]}},
-  "reason":{"type":"string","description":"Required when action=skip."}},
+  "reason":{"type":"string","description":"Required when action=skip or action=exhausted. skip means nothing THIS cycle - the idea space is not dry, expect something next time. exhausted means nothing worth proposing until the project itself changes, and PAUSES brainstorming for this project until it does; one exhausted report is enough, no threshold."}},
  "required":["action"],"additionalProperties":false}`
 
 const incidentOutcomeSchema = `{"type":"object","properties":{
@@ -267,15 +267,15 @@ func validateBrainstormOutcome(a map[string]any) error {
 			return fmt.Errorf("submit_outcome: proposals required (1..5) when action=propose")
 		}
 		return nil
-	case "skip":
+	case "skip", "exhausted":
 		if strings.TrimSpace(argString(a, "reason")) == "" {
-			return fmt.Errorf("submit_outcome: reason required (non-empty) when action=skip")
+			return fmt.Errorf("submit_outcome: reason required (non-empty) when action=%s", argString(a, "action"))
 		}
 		return nil
 	case "":
-		return fmt.Errorf("submit_outcome: action required: one of propose|skip")
+		return fmt.Errorf("submit_outcome: action required: one of propose|skip|exhausted")
 	default:
-		return fmt.Errorf("submit_outcome: action must be one of propose|skip")
+		return fmt.Errorf("submit_outcome: action must be one of propose|skip|exhausted")
 	}
 }
 
