@@ -44,7 +44,11 @@ const reviewOutcomeSchema = `{"type":"object","properties":{
 const clarifyOutcomeSchema = `{"type":"object","properties":{
   "task":{"type":"string"},
   "decision":{"type":"string","enum":["implement","close","discuss"]},
-  "reason":{"type":"string","description":"Required. For decision=implement, cite WHO approved and WHERE - the operator independently re-reads the thread and verifies both the identity AND the wording."}},
+  "reason":{"type":"string","description":"Required. For decision=implement, say in plain words WHO approved and WHY you read their comment as approval."},
+  "approval_citations":{"type":"array","items":{"type":"object","properties":{
+      "id":{"type":"string"},"quote":{"type":"string"}},
+    "required":["id","quote"]},
+    "description":"Required for decision=implement whenever a maintainer has commented: ONE entry per issue this task owns. id is that issue's most recent maintainer comment's external_id, copied verbatim from the <comment external_id=\"...\"> attribute already in your turn-0 bundle - do NOT re-crawl to find it. quote is a VERBATIM substring of that same comment's body. YOU judge whether the comment approves; the operator re-reads the comment itself and refuses if the author is not a maintainer, if it is not the most recent maintainer comment, if your quote is not in it, or if it already approved once. Omit only when no human has commented at all."}},
  "required":["decision","reason"],"additionalProperties":false}`
 
 const brainstormOutcomeSchema = `{"type":"object","properties":{
@@ -111,7 +115,7 @@ var outcomeDescriptions = map[string]string{
 	"implement":     "Finish this implement task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), or action=declined with a decline_reason. This is the only way an implement task terminates.",
 	"documentation": "Finish this documentation task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), or action=declined with a decline_reason. This is the only way a documentation task terminates.",
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
-	"clarify":       "Finish this clarify task with a decision: implement, close or discuss, plus the reason. For decision=implement the reason must cite WHO approved and WHERE; the operator independently re-reads the thread and verifies both the identity and the wording.",
+	"clarify":       "Finish this clarify task with a decision: implement, close or discuss, plus the reason. For decision=implement, also set approval_citations (one entry per owned issue with a maintainer comment) with that comment's external_id and a verbatim quote; the operator independently re-reads each cited comment and refuses the decision if the citation does not hold up.",
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, action=skip with a reason when nothing is worth proposing THIS cycle (transient - expect something the next session), or action=exhausted with a reason when nothing is worth proposing until the project itself changes (PAUSES brainstorming for this project until it does - use sparingly, only when you genuinely mean for scheduling to hold). A silent finish is not allowed.",
 	"incident":      "Finish this incident task. action=file_issue with the issue to open, action=false_positive, or action=comment_issue with comment{repo,number,body} to append fresh evidence to an existing open tracker when this alert is the SAME incident as one you found while surveying. All three require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
@@ -126,6 +130,7 @@ var outcomeArgMap = map[string]string{
 	"decline_reason":      "reason",
 	"reviewed_shas":       "reviewedSHAs",
 	"alert_rules":         "alertRules",
+	"approval_citations":  "approvalCitations",
 }
 
 // OutcomeTool returns the submit_outcome tool for one profile. An empty or
@@ -256,6 +261,22 @@ func validateClarifyOutcome(a map[string]any) error {
 	if strings.TrimSpace(argString(a, "reason")) == "" {
 		return fmt.Errorf("submit_outcome: reason required (non-empty) on every clarify decision")
 	}
+	// Shape only. WHETHER a citation was needed, whether it is the most recent
+	// maintainer comment, and whether the quote really occurs in the body are
+	// the OPERATOR's calls - it holds the mirror. A refusal there is a 200 +
+	// park, not an error here.
+	for i, raw := range outcomeList(a, "approval_citations") {
+		c, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("submit_outcome: approval_citations[%d] must be an object with id and quote", i)
+		}
+		if strings.TrimSpace(argString(c, "id")) == "" {
+			return fmt.Errorf("submit_outcome: approval_citations[%d].id required: the comment's external_id from your bundle", i)
+		}
+		if strings.TrimSpace(argString(c, "quote")) == "" {
+			return fmt.Errorf("submit_outcome: approval_citations[%d].quote required: a VERBATIM substring of that comment's body", i)
+		}
+	}
 	return nil
 }
 
@@ -350,4 +371,12 @@ func validateRefineOutcome(a map[string]any) error {
 func outcomeListLen(a map[string]any, key string) int {
 	l, _ := a[key].([]any)
 	return len(l)
+}
+
+// outcomeList is the JSON array arg itself. A missing arg, a null and a
+// non-array value all yield an empty (nil) slice, so a range over the result
+// is a no-op rather than a panic.
+func outcomeList(a map[string]any, key string) []any {
+	l, _ := a[key].([]any)
+	return l
 }
