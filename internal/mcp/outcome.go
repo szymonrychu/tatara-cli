@@ -48,7 +48,7 @@ const clarifyOutcomeSchema = `{"type":"object","properties":{
   "approval_citations":{"type":"array","items":{"type":"object","properties":{
       "id":{"type":"string"},"quote":{"type":"string"}},
     "required":["id","quote"]},
-    "description":"Required for decision=implement whenever a maintainer has commented: ONE entry per issue this task owns. id is that issue's most recent maintainer comment's external_id, copied verbatim from the <comment external_id=\"...\"> attribute already in your turn-0 bundle - do NOT re-crawl to find it. quote is a VERBATIM substring of that same comment's body. YOU judge whether the comment approves; the operator re-reads the comment itself and refuses if the author is not a maintainer, if it is not the most recent maintainer comment, if your quote is not in it, or if it already approved once. Omit only when no human has commented at all."}},
+    "description":"Required for decision=implement whenever a maintainer has commented: ONE entry per issue this task owns. id is the external_id of the maintainer comment you are citing, copied verbatim from the <comment external_id=\"...\"> attribute already in your turn-0 bundle - do NOT re-crawl to find it; it does NOT have to be the newest comment on the thread. quote is a VERBATIM substring of that same comment's body. YOU judge whether the comment approves; the operator re-reads the comment itself and refuses if the id does not name a maintainer-authored non-bot comment on that issue, if your quote is not in it, or if it already approved once. If a LATER maintainer comment withdraws the approval you would otherwise cite, send decision=discuss instead - do not cite a withdrawn approval. Omit only when no human has commented at all."}},
  "required":["decision","reason"],"additionalProperties":false}`
 
 const brainstormOutcomeSchema = `{"type":"object","properties":{
@@ -261,10 +261,10 @@ func validateClarifyOutcome(a map[string]any) error {
 	if strings.TrimSpace(argString(a, "reason")) == "" {
 		return fmt.Errorf("submit_outcome: reason required (non-empty) on every clarify decision")
 	}
-	// Shape only. WHETHER a citation was needed, whether it is the most recent
-	// maintainer comment, and whether the quote really occurs in the body are
-	// the OPERATOR's calls - it holds the mirror. A refusal there is a 200 +
-	// park, not an error here.
+	// Shape only. WHETHER a citation was needed, whether the cited id names a
+	// maintainer's comment on that issue, and whether the quote really occurs
+	// in the body are the OPERATOR's calls - it holds the mirror. A refusal
+	// there is a 200 + park, not an error here.
 	for i, raw := range outcomeList(a, "approval_citations") {
 		c, ok := raw.(map[string]any)
 		if !ok {
