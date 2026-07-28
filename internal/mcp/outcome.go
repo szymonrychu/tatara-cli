@@ -49,12 +49,12 @@ const clarifyOutcomeSchema = `{"type":"object","properties":{
 
 const brainstormOutcomeSchema = `{"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["propose","skip"]},
+  "action":{"type":"string","enum":["propose","skip","exhausted"]},
   "proposals":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{
       "repo":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},
       "kind":{"type":"string","enum":["bug","improvement"]}},
     "required":["repo","title","body","kind"]}},
-  "reason":{"type":"string","description":"Required when action=skip."}},
+  "reason":{"type":"string","description":"Required when action=skip or action=exhausted. skip means nothing THIS cycle - the idea space is not dry, expect something next time. exhausted means nothing worth proposing until the project itself changes, and PAUSES brainstorming for this project until it does; one exhausted report is enough, no threshold."}},
  "required":["action"],"additionalProperties":false}`
 
 const incidentOutcomeSchema = `{"type":"object","properties":{
@@ -112,7 +112,7 @@ var outcomeDescriptions = map[string]string{
 	"documentation": "Finish this documentation task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), or action=declined with a decline_reason. This is the only way a documentation task terminates.",
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
 	"clarify":       "Finish this clarify task with a decision: implement, close or discuss, plus the reason. For decision=implement the reason must cite WHO approved and WHERE; the operator independently re-reads the thread and verifies both the identity and the wording.",
-	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, or action=skip with the reason nothing is worth proposing this cycle. A silent finish is not allowed.",
+	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, action=skip with a reason when nothing is worth proposing THIS cycle (transient - expect something the next session), or action=exhausted with a reason when nothing is worth proposing until the project itself changes (PAUSES brainstorming for this project until it does - use sparingly, only when you genuinely mean for scheduling to hold). A silent finish is not allowed.",
 	"incident":      "Finish this incident task. action=file_issue with the issue to open, action=false_positive, or action=comment_issue with comment{repo,number,body} to append fresh evidence to an existing open tracker when this alert is the SAME incident as one you found while surveying. All three require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
 }
@@ -267,15 +267,15 @@ func validateBrainstormOutcome(a map[string]any) error {
 			return fmt.Errorf("submit_outcome: proposals required (1..5) when action=propose")
 		}
 		return nil
-	case "skip":
+	case "skip", "exhausted":
 		if strings.TrimSpace(argString(a, "reason")) == "" {
-			return fmt.Errorf("submit_outcome: reason required (non-empty) when action=skip")
+			return fmt.Errorf("submit_outcome: reason required (non-empty) when action=%s", argString(a, "action"))
 		}
 		return nil
 	case "":
-		return fmt.Errorf("submit_outcome: action required: one of propose|skip")
+		return fmt.Errorf("submit_outcome: action required: one of propose|skip|exhausted")
 	default:
-		return fmt.Errorf("submit_outcome: action must be one of propose|skip")
+		return fmt.Errorf("submit_outcome: action must be one of propose|skip|exhausted")
 	}
 }
 

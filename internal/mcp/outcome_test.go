@@ -271,6 +271,43 @@ func TestOutcome_BrainstormGates(t *testing.T) {
 	require.Contains(t, env.Payload, "proposals")
 }
 
+func TestOutcome_BrainstormExhausted(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tl, _ := OutcomeTool("brainstorm")
+
+	_, _, _, err := tl.Build(map[string]any{"action": "exhausted"})
+	require.Error(t, err, "action=exhausted requires a reason, same as skip")
+
+	_, _, _, err = tl.Build(map[string]any{"action": "exhausted", "reason": "   "})
+	require.Error(t, err, "a whitespace-only reason must not satisfy action=exhausted")
+
+	_, _, body, err := tl.Build(map[string]any{"action": "exhausted", "reason": "idea space dry until the project moves"})
+	require.NoError(t, err, "action=exhausted with a reason must be accepted, not rejected as an unknown action")
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	require.Equal(t, "brainstorm", env.Kind)
+	require.Equal(t, "exhausted", env.Payload["action"])
+	require.Equal(t, "idea space dry until the project moves", env.Payload["reason"])
+}
+
+func TestOutcomeTool_BrainstormSchemaAllowsExhausted(t *testing.T) {
+	tl, _ := OutcomeTool("brainstorm")
+	var schema struct {
+		Properties struct {
+			Action struct {
+				Enum []string `json:"enum"`
+			} `json:"action"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+	require.Equal(t, []string{"propose", "skip", "exhausted"}, schema.Properties.Action.Enum,
+		"the schema enum is the ONLY documentation the model gets; a model cannot emit an action absent here")
+}
+
 func TestOutcome_IncidentGates(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
 	tl, _ := OutcomeTool("incident")
