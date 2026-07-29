@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -508,6 +509,64 @@ func TestOutcome_RefineNeedsOneNonEmptyList(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env))
 	require.Contains(t, env.Payload, "links")
+}
+
+// TestOutcomeArgMapCoversEverySnakeCaseSchemaKey is the guard MEMORY.md:24 asks
+// for. clarifyOutcomeSchema and outcomeArgMap are two hand-maintained
+// artefacts. A snake_case arg present in a schema but ABSENT from the map
+// reaches the operator's DisallowUnknownFields decoder still snake_cased and
+// 400s at runtime, with nothing in either repo catching it at build time.
+func TestOutcomeArgMapCoversEverySnakeCaseSchemaKey(t *testing.T) {
+	for profile, schema := range outcomeSchemas {
+		var doc struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal([]byte(schema), &doc); err != nil {
+			t.Fatalf("%s: schema is not valid JSON: %v", profile, err)
+		}
+		for key := range doc.Properties {
+			if !strings.Contains(key, "_") {
+				continue // already wire-shaped
+			}
+			if _, ok := outcomeArgMap[key]; !ok {
+				t.Errorf("%s: schema property %q is snake_case but has no outcomeArgMap entry; "+
+					"it would reach the operator snake_cased and 400", profile, key)
+			}
+		}
+	}
+}
+
+// TestClarifySchemaCarriesApprovalCitations pins the new field's exact shape.
+// Item keys are single words on purpose: outcomeArgMap renames TOP-LEVEL keys
+// only, so a nested comment_id could never be converted.
+func TestClarifySchemaCarriesApprovalCitations(t *testing.T) {
+	var doc struct {
+		Properties map[string]struct {
+			Type  string `json:"type"`
+			Items struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(clarifyOutcomeSchema), &doc); err != nil {
+		t.Fatalf("clarifyOutcomeSchema: %v", err)
+	}
+	p, ok := doc.Properties["approval_citations"]
+	if !ok {
+		t.Fatal("clarifyOutcomeSchema has no approval_citations property")
+	}
+	if p.Type != "array" {
+		t.Fatalf("approval_citations type = %q, want array", p.Type)
+	}
+	for _, want := range []string{"id", "quote"} {
+		if _, ok := p.Items.Properties[want]; !ok {
+			t.Fatalf("approval_citations items missing %q", want)
+		}
+	}
+	if got := outcomeArgMap["approval_citations"]; got != "approvalCitations" {
+		t.Fatalf("outcomeArgMap[approval_citations] = %q, want approvalCitations", got)
+	}
 }
 
 func TestOutcome_DocumentationSchemaEqualsImplement(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 // means the pod is running an image from a different release train than the
 // operator that spawned it, and every tool call it makes will 404. Contract
 // G.10.
-const ContractVersion = 2
+const ContractVersion = 3
 
 // CheckContractVersion compares the injected TATARA_CONTRACT_VERSION against
 // the compiled ContractVersion. An empty value is allowed: a workstation or a
