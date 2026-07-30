@@ -20,7 +20,13 @@ REPO="${1:?repo name required}"
 TAG_MODE="${2:?tag mode required: shortsha|version}"
 BUILDKITD_ADDR="tcp://buildkitd.arc-runners:1234"
 SHORT_SHA="${GITHUB_SHA:0:7}"
-VERSION="$(git describe --tags --always --dirty)"
+# In `version` mode, release.yml's release job passes the already-cut tag in
+# as VERSION; git describe must not be trusted to pick it, because a re-run
+# of a release that failed after cutting its tag leaves two semver tags on
+# one commit and describe resolves to the LOWER one, publishing the image
+# under the previous version. `shortsha` mode never sets VERSION, so it
+# always falls through to describe here.
+VERSION="${VERSION:-$(git describe --tags --always --dirty)}"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DEST="harbor.szymonrichert.pl/containers/${REPO}"
 

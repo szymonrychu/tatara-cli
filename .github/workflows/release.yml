@@ -4,10 +4,12 @@ name: release
 # On merge to main, after the build/test/publish gate is green:
 #   1. cd-release tag    - read the merged PR's semver:<level> label, cut the
 #                          next git tag vX.Y.Z, push it.
-#   2. publish image     - build.sh re-runs with the tag present, so its
-#                          `git describe` resolves to vX.Y.Z; build.sh is
-#                          called in `version` mode here and pushes ONLY
-#                          :vX.Y.Z. ci.yml's image job already pushed
+#   2. publish image     - build.sh is called in `version` mode here and
+#                          pushes ONLY :vX.Y.Z, with VERSION passed in
+#                          explicitly from the tag step's output (not from
+#                          `git describe`, which would pick the lower of two
+#                          semver tags on a re-run after a failed release).
+#                          ci.yml's image job already pushed
 #                          :SHORT_SHA (traceability) for this commit in
 #                          `shortsha` mode - Harbor's tag immutability 412s
 #                          on a repeat push, so the two never overlap.
@@ -81,6 +83,8 @@ jobs:
           mode: tag
           token: ${{ secrets.TATARA_CD_TOKEN }}
       - name: build and push image at vX.Y.Z
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: bash .github/ci/build.sh "${{ github.event.repository.name }}" version
       - uses: jdx/mise-action@v2
         with:
