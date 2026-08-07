@@ -11,7 +11,12 @@ import (
 // means the pod is running an image from a different release train than the
 // operator that spawned it, and every tool call it makes will 404. Contract
 // G.10.
-const ContractVersion = 3
+//
+// 3 -> 4 (#521): the clarify tool profile is DELETED and its three decisions
+// became approved/discuss/rejected actions on the implement schema, alongside
+// the approving_maintainer and plan_note_id gate fields. An operator on
+// contract 3 must refuse this cli, and vice versa.
+const ContractVersion = 4
 
 // CheckContractVersion compares the injected TATARA_CONTRACT_VERSION against
 // the compiled ContractVersion. An empty value is allowed: a workstation or a

@@ -13,19 +13,23 @@ import (
 
 func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// TestKindProfiles_HasAllSevenAgentKindsIncludingClarify is the regression test
-// for the live P0 (contract L.5): the operator has always set
-// TATARA_TOOL_PROFILE=clarify, and this map has never had a clarify key, so
-// every clarify pod in production failed closed to 6 tools with no
-// submit_outcome. This class of drift is the reason for the golden below.
-func TestKindProfiles_HasAllSevenAgentKindsIncludingClarify(t *testing.T) {
-	want := []string{"brainstorm", "clarify", "documentation", "implement", "incident", "refine", "review"}
+// TestKindProfiles_HasAllSixAgentKindsAndNoClarify is the regression test for
+// the live P0 (contract L.5) in its new form. The P0 was a MISSING key: the
+// operator set TATARA_TOOL_PROFILE=clarify while this map had no clarify key,
+// so every clarify pod failed closed to 6 tools with no submit_outcome. As of
+// contract 4 the key is absent on purpose - the kind is deleted platform-wide -
+// and this test pins BOTH halves so neither an accidental omission nor an
+// accidental resurrection passes.
+func TestKindProfiles_HasAllSixAgentKindsAndNoClarify(t *testing.T) {
+	want := []string{"brainstorm", "documentation", "implement", "incident", "refine", "review"}
 	var got []string
 	for k := range kindProfiles {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	require.Equal(t, want, got, "contract G.9: the map is keyed on the 7 AGENT kinds")
+	require.Equal(t, want, got, "contract G.9: the map is keyed on the 6 AGENT kinds")
+	require.NotContains(t, kindProfiles, "clarify",
+		"clarify is deleted, not aliased: a surviving key would preserve a path to approval that skips the gate")
 }
 
 // TestAgentKinds_MatchTheOperatorsGolden is the ANTI-DRIFT test. tatara-cli and
@@ -63,17 +67,18 @@ func TestKindProfiles_IsIdentity(t *testing.T) {
 	}
 }
 
-// TestRetiredKindsAreGone: triage, lifecycle, selfImprove, healthCheck.
+// TestRetiredKindsAreGone: triage, lifecycle, selfImprove, healthCheck, and -
+// as of contract 4 - clarify.
 func TestRetiredKindsAreGone(t *testing.T) {
-	for _, k := range []string{"triage", "lifecycle", "triageIssue", "issueLifecycle", "selfImprove", "healthCheck"} {
+	for _, k := range []string{"clarify", "triage", "lifecycle", "triageIssue", "issueLifecycle", "selfImprove", "healthCheck"} {
 		_, ok := profiles[k]
 		require.False(t, ok, "retired kind %q must not be a profile", k)
 	}
 }
 
 // TestAlwaysOnIsExactlyTheContractSix (contract D.6). task_list is deliberately
-// NOT always-on: a clarify/implement/review pod that can list every Task can
-// wander into another Task's work.
+// NOT always-on: an implement/review pod that can list every Task can wander
+// into another Task's work.
 func TestAlwaysOnIsExactlyTheContractSix(t *testing.T) {
 	require.ElementsMatch(t,
 		[]string{"task_get", "task_context", "task_note", "project_get", "repo_list", "report_internal_issue"},
@@ -89,22 +94,25 @@ func TestAlwaysOnIsExactlyTheContractSix(t *testing.T) {
 // directly above it, which is the normative artifact. The surface is exactly 20
 // tools, so a profile's count is 20 minus the cells the table marks "-":
 // incident is denied issue_write and mr_write, so it is 18 and cannot be 20.
-// implement (16), review (15) and documentation (18) are likewise one below the
-// summary. The rows win; the counts below are derived from them.
+// review (15) and documentation (18) are likewise one below the summary. The
+// rows win; the counts below are derived from them.
+//
+// The clarify row is DELETED at contract 4 and its issue_write / memory-recall
+// grants are folded into implement, which is why implement is 18 and no longer
+// the summary's 17.
 func TestProfileGatingTable_IsContractD6Verbatim(t *testing.T) {
 	alwaysOnSix := []string{"task_get", "task_context", "task_note", "project_get", "repo_list", "report_internal_issue"}
 	table := map[string][]string{
 		"brainstorm":    {"submit_outcome", "task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity"},
 		"incident":      {"submit_outcome", "task_list", "scm_read", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
-		"clarify":       {"submit_outcome", "scm_read", "issue_write", "code_search", "code_context", "code_explain", "memory_query", "memory_describe"},
-		"implement":     {"submit_outcome", "scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
+		"implement":     {"submit_outcome", "scm_read", "issue_write", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
 		"review":        {"submit_outcome", "scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
 		"refine":        {"submit_outcome", "task_list", "scm_read", "issue_write", "mr_write", "memory_query", "memory_describe"},
 		"documentation": {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
 	}
 	counts := map[string]int{
-		"brainstorm": 17, "incident": 18, "clarify": 14,
-		"implement": 17, "review": 16, "refine": 13, "documentation": 18,
+		"brainstorm": 17, "incident": 18,
+		"implement": 18, "review": 16, "refine": 13, "documentation": 18,
 	}
 	require.Len(t, table, len(profiles), "every agent kind has a row and every row is an agent kind")
 	for kind, extra := range table {
@@ -127,12 +135,23 @@ func TestProfileGating_CodeAndMemoryAreNotUnconditional(t *testing.T) {
 	for _, n := range []string{"code_search", "code_context", "code_graph", "code_explain"} {
 		require.False(t, refine[n], "refine is a backlog groomer: it reads issues, not code (contract D.6)")
 	}
-	clarify := resolveProfile("clarify", discard())
-	for _, n := range []string{"code_graph", "memory_write", "memory_entity", "memory_edges"} {
-		require.False(t, clarify[n], "clarify must not hold %q (contract D.6)", n)
-	}
 	review := resolveProfile("review", discard())
 	require.False(t, review["memory_write"], "graph-mutating memory tools are denied to reviewing pods")
+}
+
+// TestImplementAbsorbedClarifysGrantsButNotItsScopeCreep pins the clarify fold.
+// The merged agent conducts the conversation on the issue AND writes the code,
+// so it takes clarify's issue_write and memory RECALL tools. Everything clarify
+// never had stays denied - the fold is a union of two allow-sets, not a licence
+// to widen implement.
+func TestImplementAbsorbedClarifysGrantsButNotItsScopeCreep(t *testing.T) {
+	implement := resolveProfile("implement", discard())
+	for _, n := range []string{"issue_write", "memory_query", "memory_describe"} {
+		require.True(t, implement[n], "implement must absorb clarify's %q: the merged agent talks on the issue as well as writing code", n)
+	}
+	for _, n := range []string{"task_list", "memory_entity", "memory_edges"} {
+		require.False(t, implement[n], "the clarify fold must not hand implement %q (contract D.6)", n)
+	}
 }
 
 func TestResolveProfile_EmptyFailsClosedToExactlySixTools(t *testing.T) {

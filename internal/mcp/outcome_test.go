@@ -10,18 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var outcomeProfiles = []string{"brainstorm", "incident", "clarify", "implement", "review", "refine", "documentation"}
+var outcomeProfiles = []string{"brainstorm", "incident", "implement", "review", "refine", "documentation"}
 
-func TestOutcomeTool_ExistsForAllSevenAgentKinds(t *testing.T) {
+func TestOutcomeTool_ExistsForAllSixAgentKinds(t *testing.T) {
 	for _, p := range outcomeProfiles {
 		tl, ok := OutcomeTool(p)
 		require.True(t, ok, "profile %q must have a submit_outcome; a pod with no terminal tool cannot finish its Task", p)
-		require.Equal(t, "submit_outcome", tl.Name, "one name, seven schemas")
+		require.Equal(t, "submit_outcome", tl.Name, "one name, six schemas")
 	}
 }
 
 func TestOutcomeTool_EmptyAndUnknownProfileHaveNone(t *testing.T) {
-	for _, p := range []string{"", "triage", "lifecycle", "selfImprove", "nonsense"} {
+	for _, p := range []string{"", "clarify", "triage", "lifecycle", "selfImprove", "nonsense"} {
 		_, ok := OutcomeTool(p)
 		require.False(t, ok, "profile %q must NOT get a submit_outcome (fail closed)", p)
 	}
@@ -50,8 +50,8 @@ func TestOutcomeTool_TargetIsOperator(t *testing.T) {
 
 func TestOutcome_PostsTheEnvelopeWithTheProfileAsKind(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
-	tl, _ := OutcomeTool("clarify")
-	m, p, body, err := tl.Build(map[string]any{"decision": "implement", "reason": "szymonrychu said 'go ahead' on tatara-operator#291"})
+	tl, _ := OutcomeTool("implement")
+	m, p, body, err := tl.Build(map[string]any{"action": "discuss", "reason": "szymonrychu asked for the scope to be narrowed first"})
 	require.NoError(t, err)
 	require.Equal(t, "POST", m)
 	require.Equal(t, "/tasks/t1/outcome", p)
@@ -63,22 +63,22 @@ func TestOutcome_PostsTheEnvelopeWithTheProfileAsKind(t *testing.T) {
 		Payload map[string]any `json:"payload"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &env))
-	require.Equal(t, "clarify", env.Kind, "kind MUST equal the pod's agent kind; the operator 409s a mismatch")
-	require.Equal(t, "implement", env.Payload["decision"])
-	require.Equal(t, "szymonrychu said 'go ahead' on tatara-operator#291", env.Payload["reason"])
+	require.Equal(t, "implement", env.Kind, "kind MUST equal the pod's agent kind; the operator 409s a mismatch")
+	require.Equal(t, "discuss", env.Payload["action"])
+	require.Equal(t, "szymonrychu asked for the scope to be narrowed first", env.Payload["reason"])
 }
 
 func TestOutcome_RequiresATask(t *testing.T) {
 	t.Setenv("TATARA_TASK", "")
-	tl, _ := OutcomeTool("clarify")
-	_, _, _, err := tl.Build(map[string]any{"decision": "close", "reason": "dup"})
+	tl, _ := OutcomeTool("implement")
+	_, _, _, err := tl.Build(map[string]any{"action": "rejected", "reason": "dup"})
 	require.Error(t, err, "no task argument and no TATARA_TASK must fail fast")
 }
 
 func TestOutcome_TaskArgIsNotOnTheWire(t *testing.T) {
 	t.Setenv("TATARA_TASK", "")
-	tl, _ := OutcomeTool("clarify")
-	_, p, body, err := tl.Build(map[string]any{"task": "t9", "decision": "close", "reason": "dup"})
+	tl, _ := OutcomeTool("implement")
+	_, p, body, err := tl.Build(map[string]any{"task": "t9", "action": "rejected", "reason": "dup"})
 	require.NoError(t, err)
 	require.Equal(t, "/tasks/t9/outcome", p)
 	raw, _ := json.Marshal(body)
@@ -235,13 +235,222 @@ func TestOutcome_ReviewDescriptionDoesNotImplyAgentPostsAReview(t *testing.T) {
 	require.Contains(t, tl.Description, "do not choose", "the agent has no forge event to choose; mr_write has no approve/request_changes action either")
 }
 
-func TestOutcome_ClarifyRequiresDecisionAndReason(t *testing.T) {
-	t.Setenv("TATARA_TASK", "t1")
-	tl, _ := OutcomeTool("clarify")
-	_, _, _, err := tl.Build(map[string]any{"decision": "close"})
-	require.Error(t, err, "reason is always required (contract D.1)")
-	_, _, _, err = tl.Build(map[string]any{"reason": "because"})
-	require.Error(t, err, "decision is always required")
+func TestOutcome_ImplementActionEnumCarriesTheGateActions(t *testing.T) {
+	tool, ok := OutcomeTool("implement")
+	require.True(t, ok)
+
+	var schema struct {
+		Properties struct {
+			Action struct {
+				Enum []string `json:"enum"`
+			} `json:"action"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tool.Schema, &schema))
+	require.ElementsMatch(t,
+		[]string{"submitted", "declined", "approved", "discuss", "rejected"},
+		schema.Properties.Action.Enum,
+		"the schema enum is the ONLY documentation the model gets; a model cannot emit an action absent here")
+}
+
+// TestOutcome_ImplementApprovedRequiresTheGateFields covers the two fields that
+// are required on EVERY approval. approving_maintainer is deliberately not one
+// of them - see TestOutcome_ImplementApprovedPairsMaintainerWithCitations.
+func TestOutcome_ImplementApprovedRequiresTheGateFields(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"no plan_note_id", map[string]any{
+			"action": "approved", "reason": "r", "approving_maintainer": "szymonrychu",
+			"approval_citations": []any{map[string]any{"id": "c1", "quote": "go ahead"}},
+		}, "plan_note_id required"},
+		{"no reason", map[string]any{
+			"action": "approved", "approving_maintainer": "szymonrychu", "plan_note_id": "n-1",
+			"approval_citations": []any{map[string]any{"id": "c1", "quote": "go ahead"}},
+		}, "reason required"},
+		{"no plan_note_id on the auto-approve path either", map[string]any{
+			"action": "approved", "reason": "tatara proposed this issue; no human has commented",
+		}, "plan_note_id required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateOutcome("implement", tc.args)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+// TestOutcome_ImplementApprovedPairsMaintainerWithCitations is the
+// autoApproveTataraProposals carve-out, client-side.
+//
+// The operator grants approval with NO human comment when tatara itself
+// proposed the issue (api/v1alpha1/proposal_marker.go: the evidence carries the
+// sentinel Login "<tatara:auto>" and an EMPTY CommentID). On that path there is
+// no comment author, so there is no maintainer login the agent could declare.
+// Making approving_maintainer unconditionally required would make the carve-out
+// physically unreachable and stop self-proposed work being implementable - it is
+// live-enabled on two of the three Projects in the cluster.
+//
+// The cli enforces SHAPE only. WHETHER auto-approve applies is operator-side
+// state (project flag + provenance marker + mirror-vs-Spec hash comparison) that
+// the cli cannot see, so the cli must accept the omission and let the operator
+// refuse it. Same reasoning that already makes approval_citations optional.
+//
+// What the cli CAN enforce is that the two travel together: both (a human
+// comment is the go-ahead) or neither (auto-approve). Half-populated is always
+// wrong and would otherwise surface as a confusing operator-side refusal -
+// approver-mismatch, because there is no citation for the declared login to
+// agree with.
+func TestOutcome_ImplementApprovedPairsMaintainerWithCitations(t *testing.T) {
+	citations := []any{map[string]any{"id": "c1", "quote": "go ahead"}}
+
+	t.Run("neither is the auto-approve path and is accepted", func(t *testing.T) {
+		require.NoError(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1",
+			"reason": "tatara proposed this issue itself and no human has commented",
+		}))
+	})
+
+	t.Run("both is the human-cited path and is accepted", func(t *testing.T) {
+		require.NoError(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1", "reason": "szymonrychu said go ahead",
+			"approving_maintainer": "szymonrychu", "approval_citations": citations,
+		}))
+	})
+
+	t.Run("maintainer without citations is refused", func(t *testing.T) {
+		require.ErrorContains(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1", "reason": "r",
+			"approving_maintainer": "szymonrychu",
+		}), "approving_maintainer requires approval_citations")
+	})
+
+	t.Run("citations without a maintainer are refused", func(t *testing.T) {
+		require.ErrorContains(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1", "reason": "r",
+			"approval_citations": citations,
+		}), "approval_citations requires approving_maintainer")
+	})
+
+	t.Run("an empty citation list does not count as citing", func(t *testing.T) {
+		require.ErrorContains(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1", "reason": "r",
+			"approving_maintainer": "szymonrychu", "approval_citations": []any{},
+		}), "approving_maintainer requires approval_citations")
+	})
+
+	t.Run("a blank maintainer is refused rather than read as omitted", func(t *testing.T) {
+		require.ErrorContains(t, validateOutcome("implement", map[string]any{
+			"action": "approved", "plan_note_id": "n-1", "reason": "r",
+			"approving_maintainer": "   ", "approval_citations": citations,
+		}), "approving_maintainer must not be blank")
+	})
+}
+
+func TestOutcome_ImplementApprovedCitationsAreShapeChecked(t *testing.T) {
+	base := func(citations []any) map[string]any {
+		return map[string]any{
+			"action": "approved", "reason": "r", "approving_maintainer": "szymonrychu",
+			"plan_note_id": "n-1", "approval_citations": citations,
+		}
+	}
+	require.ErrorContains(t,
+		validateOutcome("implement", base([]any{map[string]any{"quote": "go ahead"}})),
+		"approval_citations[0].id required")
+	require.ErrorContains(t,
+		validateOutcome("implement", base([]any{map[string]any{"id": "c1", "quote": "  "}})),
+		"approval_citations[0].quote required")
+	require.ErrorContains(t,
+		validateOutcome("implement", base([]any{"not-an-object"})),
+		"approval_citations[0] must be an object")
+	require.NoError(t, validateOutcome("implement", base(
+		[]any{map[string]any{"id": "c1", "quote": "go ahead"}, map[string]any{"id": "c2", "quote": "yes please"}})),
+		"one citation per owned issue: several well-formed entries must pass")
+}
+
+func TestOutcome_ImplementDiscussAndRejectedNeedOnlyAReason(t *testing.T) {
+	for _, action := range []string{"discuss", "rejected"} {
+		require.NoError(t, validateOutcome("implement",
+			map[string]any{"action": action, "reason": "because"}))
+		require.ErrorContains(t,
+			validateOutcome("implement", map[string]any{"action": action}),
+			"reason required")
+	}
+}
+
+func TestOutcome_ImplementSubmittedStillRefusesTheGateFields(t *testing.T) {
+	err := validateOutcome("implement", map[string]any{
+		"action": "submitted", "title": "t", "body": "b", "change_significance": "patch",
+		"approving_maintainer": "szymonrychu",
+	})
+	require.ErrorContains(t, err, "approving_maintainer is only valid when action=approved")
+}
+
+func TestOutcome_ImplementDeclinedStillRefusesTheGateFields(t *testing.T) {
+	for _, k := range []string{"approving_maintainer", "plan_note_id", "approval_citations"} {
+		err := validateOutcome("implement", map[string]any{
+			"action": "declined", "decline_reason": "already fixed on main", k: "x",
+		})
+		require.ErrorContains(t, err, k+" is only valid when action=approved",
+			"a code outcome must not be able to smuggle an approval past the gate")
+	}
+}
+
+// TestOutcome_ImplementReasonAndDeclineReasonNeverCollide guards a collision
+// this change created: outcomeArgMap sends decline_reason to the wire as
+// `reason`, and the implement schema now ALSO carries a top-level `reason` for
+// the gate actions. Both set payload["reason"], and buildOutcomePayload ranges
+// over a map, so accepting both would make the wire value depend on Go's
+// randomised map order. Exactly one of the two is legal per action.
+func TestOutcome_ImplementReasonAndDeclineReasonNeverCollide(t *testing.T) {
+	require.ErrorContains(t, validateOutcome("implement", map[string]any{
+		"action": "declined", "decline_reason": "already fixed", "reason": "something else",
+	}), "reason is only valid when action=approved, discuss or rejected")
+
+	require.ErrorContains(t, validateOutcome("implement", map[string]any{
+		"action": "submitted", "title": "t", "body": "b", "change_significance": "patch",
+		"reason": "something else",
+	}), "reason is only valid when action=approved, discuss or rejected")
+
+	for _, action := range []string{"approved", "discuss", "rejected"} {
+		require.ErrorContains(t, validateOutcome("implement", map[string]any{
+			"action": action, "reason": "r", "approving_maintainer": "szymonrychu",
+			"plan_note_id": "n-1", "decline_reason": "no",
+		}), "decline_reason is only for action=declined")
+	}
+}
+
+func TestOutcome_ApprovedMapsTheNewWireFields(t *testing.T) {
+	got, err := buildOutcomePayload("implement", map[string]any{
+		"action": "approved", "reason": "maintainer said go", "plan_note_id": "n-7",
+		"approving_maintainer": "szymonrychu",
+		"approval_citations":   []any{map[string]any{"id": "c1", "quote": "go ahead"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "szymonrychu", got["approvingMaintainer"])
+	require.Equal(t, "n-7", got["planNoteId"])
+	require.Contains(t, got, "approvalCitations")
+	require.NotContains(t, got, "approving_maintainer")
+	require.NotContains(t, got, "plan_note_id")
+}
+
+func TestOutcomeTool_HasNoClarifyProfile(t *testing.T) {
+	_, ok := OutcomeTool("clarify")
+	require.False(t, ok, "clarify is deleted; a pod claiming it must get NO submit_outcome (fail closed)")
+}
+
+// TestOutcome_DocumentationRefusesTheGateActions is the server-side half of
+// TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOnly: the schema is
+// the only thing the model reads, but validateOutcome is what actually stops a
+// documentation pod driving an approval gate it has no handler for.
+func TestOutcome_DocumentationRefusesTheGateActions(t *testing.T) {
+	for _, action := range []string{"approved", "discuss", "rejected"} {
+		err := validateOutcome("documentation", map[string]any{
+			"action": action, "reason": "r", "approving_maintainer": "szymonrychu", "plan_note_id": "n-1",
+		})
+		require.ErrorContains(t, err, "action must be one of submitted|declined")
+	}
 }
 
 func TestOutcome_BrainstormGates(t *testing.T) {
@@ -512,7 +721,7 @@ func TestOutcome_RefineNeedsOneNonEmptyList(t *testing.T) {
 }
 
 // TestOutcomeArgMapCoversEverySnakeCaseSchemaKey is the guard MEMORY.md:24 asks
-// for. clarifyOutcomeSchema and outcomeArgMap are two hand-maintained
+// for. The outcome schemas and outcomeArgMap are two hand-maintained
 // artefacts. A snake_case arg present in a schema but ABSENT from the map
 // reaches the operator's DisallowUnknownFields decoder still snake_cased and
 // 400s at runtime, with nothing in either repo catching it at build time.
@@ -536,10 +745,11 @@ func TestOutcomeArgMapCoversEverySnakeCaseSchemaKey(t *testing.T) {
 	}
 }
 
-// TestClarifySchemaCarriesApprovalCitations pins the new field's exact shape.
-// Item keys are single words on purpose: outcomeArgMap renames TOP-LEVEL keys
-// only, so a nested comment_id could never be converted.
-func TestClarifySchemaCarriesApprovalCitations(t *testing.T) {
+// TestImplementSchemaCarriesApprovalCitations pins the field's exact shape on
+// the schema that now owns it. Item keys are single words on purpose:
+// outcomeArgMap renames TOP-LEVEL keys only, so a nested comment_id could
+// never be converted.
+func TestImplementSchemaCarriesApprovalCitations(t *testing.T) {
 	var doc struct {
 		Properties map[string]struct {
 			Type  string `json:"type"`
@@ -549,12 +759,12 @@ func TestClarifySchemaCarriesApprovalCitations(t *testing.T) {
 			} `json:"items"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal([]byte(clarifyOutcomeSchema), &doc); err != nil {
-		t.Fatalf("clarifyOutcomeSchema: %v", err)
+	if err := json.Unmarshal([]byte(implementOutcomeSchema), &doc); err != nil {
+		t.Fatalf("implementOutcomeSchema: %v", err)
 	}
 	p, ok := doc.Properties["approval_citations"]
 	if !ok {
-		t.Fatal("clarifyOutcomeSchema has no approval_citations property")
+		t.Fatal("implementOutcomeSchema has no approval_citations property")
 	}
 	if p.Type != "array" {
 		t.Fatalf("approval_citations type = %q, want array", p.Type)
@@ -569,11 +779,35 @@ func TestClarifySchemaCarriesApprovalCitations(t *testing.T) {
 	}
 }
 
-func TestOutcome_DocumentationSchemaEqualsImplement(t *testing.T) {
-	impl, _ := OutcomeTool("implement")
-	doc, _ := OutcomeTool("documentation")
-	var a, b any
-	require.NoError(t, json.Unmarshal(impl.Schema, &a))
-	require.NoError(t, json.Unmarshal(doc.Schema, &b))
-	require.Equal(t, a, b, "contract D.1: implement and documentation are identical")
+// TestDocumentationSchemaHasNoGateFields is the other half of the Task 4.1
+// split: documentation must not merely refuse the gate ACTIONS, it must not
+// advertise the gate FIELDS either. additionalProperties is false, so a field
+// absent here is unreachable.
+func TestDocumentationSchemaHasNoGateFields(t *testing.T) {
+	tool, ok := OutcomeTool("documentation")
+	require.True(t, ok)
+	var doc struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tool.Schema, &doc))
+	for _, k := range []string{"reason", "approving_maintainer", "plan_note_id", "approval_citations"} {
+		require.NotContains(t, doc.Properties, k,
+			"documentation has no approval gate; %q must not be reachable from its schema", k)
+	}
+}
+
+func TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOnly(t *testing.T) {
+	tool, ok := OutcomeTool("documentation")
+	require.True(t, ok)
+
+	var schema struct {
+		Properties struct {
+			Action struct {
+				Enum []string `json:"enum"`
+			} `json:"action"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tool.Schema, &schema))
+	require.ElementsMatch(t, []string{"submitted", "declined"}, schema.Properties.Action.Enum,
+		"a documentation agent has no approval gate to drive; it must never be able to emit approved/discuss/rejected")
 }
