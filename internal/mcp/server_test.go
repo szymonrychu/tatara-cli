@@ -31,12 +31,13 @@ import (
 // line under the table says 17/20/14/17/16/13/19; it is arithmetically wrong and
 // contradicts the table it summarises (incident is denied issue_write and
 // mr_write, so it cannot be 20 out of a 20-tool surface). The table is
-// normative; these are its counts.
+// normative; these are its counts. The clarify row is deleted at contract 4;
+// implement is 18, not the summary's 17, because clarify's issue_write folded
+// into it.
 var profileToolCounts = map[string]int{
 	"brainstorm":    17,
 	"incident":      18,
-	"clarify":       14,
-	"implement":     17,
+	"implement":     18,
 	"review":        16,
 	"refine":        13,
 	"documentation": 18,
@@ -133,7 +134,7 @@ func TestNewServer_ToolsListIsNoLongerIdenticalAcrossProfiles(t *testing.T) {
 	// not allowed to call.
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
-	a := NewServer(mem, op, discardLogger(), "clarify").RegisteredNames()
+	a := NewServer(mem, op, discardLogger(), "refine").RegisteredNames()
 	b := NewServer(mem, op, discardLogger(), "implement").RegisteredNames()
 	require.NotEqual(t, a, b)
 }
@@ -208,12 +209,12 @@ func TestRegister_LogsInfoOnSuccess(t *testing.T) {
 func TestNewServer_LogsResolvedSurface(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), logger, "clarify")
+	NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), logger, "implement")
 
 	logged := buf.String()
 	assert.Contains(t, logged, "tools_registered", "startup must log the resolved surface")
-	assert.Contains(t, logged, "clarify")
-	assert.Contains(t, logged, `"count":14`)
+	assert.Contains(t, logged, "implement")
+	assert.Contains(t, logged, `"count":18`)
 }
 
 // TestRegister_LogsErrorOnFailure verifies that a backend error produces an
@@ -371,8 +372,8 @@ func TestCallTool_NonRegisteredToolIsNotCallable(t *testing.T) {
 	}))
 	defer op.Close()
 
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "clarify")
-	require.False(t, srv.allow["mr_write"], "clarify must not hold mr_write")
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "brainstorm")
+	require.False(t, srv.allow["mr_write"], "brainstorm must not hold mr_write")
 	require.NotContains(t, srv.RegisteredNames(), "mr_write")
 
 	ctx := context.Background()

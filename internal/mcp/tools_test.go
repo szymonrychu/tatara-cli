@@ -167,7 +167,7 @@ func TestReapedToolsAreGone(t *testing.T) {
 func TestServer_ToolCountAfterOutcomeFold(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), log, "implement")
-	require.Equal(t, 17, s.ToolCount(), "the implement profile registers its allow-set only: the always-on six, its 10 granted tools, and its submit_outcome (contract D.6)")
+	require.Equal(t, 18, s.ToolCount(), "the implement profile registers its allow-set only: the always-on six, its 11 granted tools (10 plus the issue_write it absorbed from the deleted clarify profile), and its submit_outcome (contract D.6)")
 
 	none := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), log, "")
 	require.Equal(t, 6, none.ToolCount(), "an empty profile fails closed to the always-on six and gets NO submit_outcome: a pod with no recognised profile must not be able to terminate a Task")

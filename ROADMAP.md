@@ -73,6 +73,26 @@ decommissioned - `task_note` is now the platform's only agent-to-agent
 channel. `tatara mcp` refuses to start on a `TATARA_CONTRACT_VERSION`
 mismatch. See `~/Documents/tatara-new/docs/superpowers/plans/2026-07-12-task-centric-cli.md`.
 
+## v2.0.0 - contract 4: the clarify fold and the implement approval gate
+
+**Status:** code-complete 2026-08-07 (tatara #521, MR4 of seven).
+
+`clarify` is deleted as an agent kind and a tool profile: 7 kinds -> 6.
+Its `implement`/`close`/`discuss` decisions became `approved`/`rejected`/
+`discuss` actions on the implement `submit_outcome`, alongside the new
+`approvingMaintainer` and `planNoteId` gate fields (`approvalCitations`
+moved across unchanged). `documentation` stopped aliasing
+`implementOutcomeSchema` and got its own, so it cannot emit the gate
+actions. The implement profile absorbed clarify's `issue_write` and
+memory-recall grants (17 -> 18 tools). `ContractVersion` 3 -> 4, which an
+operator or wrapper on 3 must refuse at pod-ready.
+
+Backward-incompatible by definition, and it gates the skills MR: the
+released `tool-manifest.json` is what `tatara-agent-skills`'
+`validate_tool_calls.py` validates against, so this must RELEASE before
+that repo can document the new actions. See
+`~/Documents/tatara-new/code/tatara-operator/docs/superpowers/plans/2026-08-07-521-lifecycle-and-agent-merge.md`.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned
