@@ -7,7 +7,7 @@ import (
 )
 
 // kindProfiles maps Task.status.agentKind to a TATARA_TOOL_PROFILE value. It is
-// keyed on the AGENT kind (6 values), not the Task origin kind. tatara-operator
+// keyed on the AGENT kind (7 values), not the Task origin kind. tatara-operator
 // carries the same map at internal/agent/pod.go - by contract, not by import
 // (there is no shared module). testdata/agent-kinds.txt is the golden both
 // repos check against; see TestAgentKinds_MatchTheOperatorsGolden.
@@ -18,6 +18,9 @@ import (
 // "clarify" was absent here while pod.go set it. "clarify" is absent again as
 // of contract 4, and this time deliberately: the kind is deleted platform-wide
 // and the operator's migration rewrites every live clarify Task to implement.
+// "upgrade" is the 7th kind (2026-08-13); this repo ships it BEFORE
+// tatara-operator - see MEMORY.md - so operator-ahead-of-cli never repeats
+// the same wedge for it.
 var kindProfiles = map[string]string{
 	"brainstorm":    "brainstorm",
 	"documentation": "documentation",
@@ -25,9 +28,10 @@ var kindProfiles = map[string]string{
 	"incident":      "incident",
 	"refine":        "refine",
 	"review":        "review",
+	"upgrade":       "upgrade",
 }
 
-// AgentKinds returns the six agent kinds, sorted.
+// AgentKinds returns the seven agent kinds, sorted.
 func AgentKinds() []string {
 	out := make([]string, 0, len(kindProfiles))
 	for k := range kindProfiles {
@@ -61,6 +65,12 @@ var profiles = map[string][]string{
 	"review":        {"scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
 	"refine":        {"task_list", "scm_read", "issue_write", "mr_write", "memory_query", "memory_describe"},
 	"documentation": {"scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
+	// upgrade opens MRs across several repos for ONE dependency-upgrade unit.
+	// It gets implement's code and memory grants and mr_write, but NOT
+	// issue_write (it drives no approval gate) and NOT task_list (contract D.6
+	// denies it to every MR-opening kind; sibling-unit dedup goes through
+	// task_context(index=true), which is always-on).
+	"upgrade": {"scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
 }
 
 // resolveProfile FAILS CLOSED. Every agent pod on this platform shares ONE OIDC

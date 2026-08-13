@@ -13,23 +13,40 @@ import (
 
 func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// TestKindProfiles_HasAllSixAgentKindsAndNoClarify is the regression test for
-// the live P0 (contract L.5) in its new form. The P0 was a MISSING key: the
-// operator set TATARA_TOOL_PROFILE=clarify while this map had no clarify key,
-// so every clarify pod failed closed to 6 tools with no submit_outcome. As of
-// contract 4 the key is absent on purpose - the kind is deleted platform-wide -
-// and this test pins BOTH halves so neither an accidental omission nor an
-// accidental resurrection passes.
-func TestKindProfiles_HasAllSixAgentKindsAndNoClarify(t *testing.T) {
-	want := []string{"brainstorm", "documentation", "implement", "incident", "refine", "review"}
+// TestKindProfiles_HasAllSevenAgentKindsAndNoClarify is the regression test
+// for the live P0 (contract L.5) in its new form. The P0 was a MISSING key:
+// the operator set TATARA_TOOL_PROFILE=clarify while this map had no clarify
+// key, so every clarify pod failed closed to 6 tools with no submit_outcome.
+// As of contract 4 the key is absent on purpose - the kind is deleted
+// platform-wide - and this test pins BOTH halves so neither an accidental
+// omission nor an accidental resurrection passes. "upgrade" is the 7th kind
+// (2026-08-13): a scheduled agent kind that opens MRs the same way implement
+// does, with no approval gate.
+func TestKindProfiles_HasAllSevenAgentKindsAndNoClarify(t *testing.T) {
+	want := []string{"brainstorm", "documentation", "implement", "incident", "refine", "review", "upgrade"}
 	var got []string
 	for k := range kindProfiles {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	require.Equal(t, want, got, "contract G.9: the map is keyed on the 6 AGENT kinds")
+	require.Equal(t, want, got, "contract G.9: the map is keyed on the 7 AGENT kinds")
 	require.NotContains(t, kindProfiles, "clarify",
 		"clarify is deleted, not aliased: a surviving key would preserve a path to approval that skips the gate")
+}
+
+// TestUpgradeProfile_HasMRWriteButNoIssueWriteOrTaskList: the upgrade agent
+// opens MRs and reads code, but it drives NO approval gate (issue_write) -
+// nobody filed an issue for a scheduled upgrade - and must not be able to
+// enumerate other Tasks' work (task_list). Unit-level dedup goes through
+// task_context(index=true), which is always-on.
+func TestUpgradeProfile_HasMRWriteButNoIssueWriteOrTaskList(t *testing.T) {
+	allow := resolveProfile("upgrade", discard())
+	for _, want := range []string{"mr_write", "scm_read", "code_search", "code_graph", "memory_write", "submit_outcome"} {
+		require.True(t, allow[want], "upgrade profile must grant %s", want)
+	}
+	for _, deny := range []string{"issue_write", "task_list", "mr_takeover_request", "memory_entity", "memory_edges"} {
+		require.False(t, allow[deny], "upgrade profile must NOT grant %s", deny)
+	}
 }
 
 // TestAgentKinds_MatchTheOperatorsGolden is the ANTI-DRIFT test. tatara-cli and
@@ -99,7 +116,9 @@ func TestAlwaysOnIsExactlyTheContractSix(t *testing.T) {
 //
 // The clarify row is DELETED at contract 4 and its issue_write / memory-recall
 // grants are folded into implement, which is why implement is 18 and no longer
-// the summary's 17.
+// the summary's 17. The upgrade row is new at 2026-08-13 (not part of contract
+// D.6's original table): it is implement's code/memory grants plus mr_write,
+// without issue_write or task_list.
 func TestProfileGatingTable_IsContractD6Verbatim(t *testing.T) {
 	alwaysOnSix := []string{"task_get", "task_context", "task_note", "project_get", "repo_list", "report_internal_issue"}
 	table := map[string][]string{
@@ -109,10 +128,11 @@ func TestProfileGatingTable_IsContractD6Verbatim(t *testing.T) {
 		"review":        {"submit_outcome", "scm_read", "mr_write", "mr_takeover_request", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe"},
 		"refine":        {"submit_outcome", "task_list", "scm_read", "issue_write", "mr_write", "memory_query", "memory_describe"},
 		"documentation": {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write", "memory_entity", "memory_edges"},
+		"upgrade":       {"submit_outcome", "scm_read", "mr_write", "code_search", "code_context", "code_graph", "code_explain", "memory_query", "memory_describe", "memory_write"},
 	}
 	counts := map[string]int{
 		"brainstorm": 17, "incident": 18,
-		"implement": 18, "review": 16, "refine": 13, "documentation": 18,
+		"implement": 18, "review": 16, "refine": 13, "documentation": 18, "upgrade": 16,
 	}
 	require.Len(t, table, len(profiles), "every agent kind has a row and every row is an agent kind")
 	for kind, extra := range table {
