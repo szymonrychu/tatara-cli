@@ -10,7 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var outcomeProfiles = []string{"brainstorm", "incident", "implement", "review", "refine", "documentation", "upgrade"}
+// outcomeProfiles is derived from AgentKinds() rather than hand-listed: every
+// schema-golden and existence test below keys off it, so a kind added to
+// profiles but omitted here would otherwise go untested and silently green.
+var outcomeProfiles = AgentKinds()
 
 func TestOutcomeTool_ExistsForAllSevenAgentKinds(t *testing.T) {
 	for _, p := range outcomeProfiles {
@@ -30,7 +33,7 @@ func TestOutcome_UpgradeRefusesTheGateActions(t *testing.T) {
 	require.True(t, ok, "upgrade profile must have submit_outcome")
 	for _, action := range []string{"approved", "discuss", "rejected"} {
 		_, _, _, err := tool.Build(map[string]any{"task": "t", "action": action, "reason": "r"})
-		require.Error(t, err, "action=%s must be refused for the upgrade profile", action)
+		require.ErrorContains(t, err, "action must be one of submitted|declined", "action=%s must be refused for the upgrade profile", action)
 	}
 }
 
@@ -53,6 +56,8 @@ func TestOutcome_UpgradeSubmittedCarriesMergeOrder(t *testing.T) {
 	require.Equal(t, "upgrade", env.Kind)
 	require.Contains(t, env.Payload, "mergeOrder", "merge_order must map to the camelCase mergeOrder wire field")
 	require.Contains(t, env.Payload, "changeSignificance", "change_significance must map to changeSignificance")
+	require.NotContains(t, env.Payload, "merge_order", "a mapper that copied instead of renamed must not pass")
+	require.NotContains(t, env.Payload, "change_significance", "a mapper that copied instead of renamed must not pass")
 }
 
 func TestOutcomeTool_EmptyAndUnknownProfileHaveNone(t *testing.T) {
@@ -162,7 +167,7 @@ func TestOutcome_ImplementDeclineMapsReason(t *testing.T) {
 
 func TestOutcome_ImplementGates(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
-	for _, profile := range []string{"implement", "documentation"} {
+	for _, profile := range []string{"implement", "documentation", "upgrade"} {
 		tl, _ := OutcomeTool(profile)
 		t.Run(profile+"/no action", func(t *testing.T) {
 			_, _, _, err := tl.Build(map[string]any{"title": "t", "body": "b", "change_significance": "patch"})

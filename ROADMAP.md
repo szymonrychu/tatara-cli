@@ -93,6 +93,21 @@ released `tool-manifest.json` is what `tatara-agent-skills`'
 that repo can document the new actions. See
 `~/Documents/tatara-new/code/tatara-operator/docs/superpowers/plans/2026-08-07-521-lifecycle-and-agent-merge.md`.
 
+## v2.1.0 - the upgrade agent kind
+
+**Status:** code-complete 2026-08-13.
+
+`upgrade` is added as the 7th agent kind: 6 kinds -> 7. It opens MRs across
+several repos for one dependency-upgrade unit, reusing implement's code and
+memory grants plus `mr_write`, but without `issue_write` (it drives no
+approval gate - nobody filed an issue for a scheduled upgrade) or `task_list`
+(contract D.6 denies it to every MR-opening kind; sibling-unit dedup goes
+through the always-on `task_context(index=true)`). Its `submit_outcome`
+schema reuses `documentationOutcomeSchema` (gate-less, submitted|declined
+only) rather than duplicating it. This repo ships the kind BEFORE
+tatara-operator (see MEMORY.md) so operator-ahead-of-cli never repeats the
+contract L.5 P0 that "clarify" caused for the same reason.
+
 ## v0.1.1 - follow-ups
 
 **Status:** planned

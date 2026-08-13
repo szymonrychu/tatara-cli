@@ -203,6 +203,46 @@ func TestRefine_MRWriteIsCommentOnly(t *testing.T) {
 	require.NoError(t, checkRefineMRWrite("implement", map[string]any{"action": "open", "repo": "r", "title": "t", "body": "b"}))
 }
 
+// TestFourRegistriesAgreeOnTheAgentKindSet is the guard finding 3 of the
+// upgrade-kind review asked for. resolveProfile sets allow["submit_outcome"]
+// = true for ANY key present in profiles, unconditionally - but server.go:83
+// only actually registers submit_outcome when outcomeSchemas[profile] exists.
+// A kind added to kindProfiles/profiles but forgotten in outcomeSchemas would
+// therefore produce an allow-set that CLAIMS a terminal tool the pod does not
+// have: the Task could never terminate. Pin all four sources of the agent-kind
+// set - kindProfiles, profiles, outcomeSchemas, and AgentKinds() itself - to
+// be exactly identical, so any future kind addition that misses one of the
+// four hand-edited maps fails here instead of shipping a live wedge.
+func TestFourRegistriesAgreeOnTheAgentKindSet(t *testing.T) {
+	keysOf := func(m map[string]bool) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	kindProfilesKeys := map[string]bool{}
+	for k := range kindProfiles {
+		kindProfilesKeys[k] = true
+	}
+	profilesKeys := map[string]bool{}
+	for k := range profiles {
+		profilesKeys[k] = true
+	}
+	outcomeSchemasKeys := map[string]bool{}
+	for k := range outcomeSchemas {
+		outcomeSchemasKeys[k] = true
+	}
+
+	agentKinds := AgentKinds()
+
+	require.Equal(t, agentKinds, keysOf(kindProfilesKeys), "kindProfiles must carry exactly the agent kinds")
+	require.Equal(t, agentKinds, keysOf(profilesKeys), "profiles must carry exactly the agent kinds")
+	require.Equal(t, agentKinds, keysOf(outcomeSchemasKeys), "outcomeSchemas must carry exactly the agent kinds - a kind missing here has an allow-set claiming submit_outcome that server.go never registers")
+}
+
 func TestAllProfileNamesExistInTheRegistries(t *testing.T) {
 	live := map[string]bool{}
 	for _, tl := range append(append(append(CodeTools(), MemoryTools()...), SCMTools()...), PlatformTools()...) {
