@@ -10,14 +10,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var outcomeProfiles = []string{"brainstorm", "incident", "implement", "review", "refine", "documentation"}
+var outcomeProfiles = []string{"brainstorm", "incident", "implement", "review", "refine", "documentation", "upgrade"}
 
-func TestOutcomeTool_ExistsForAllSixAgentKinds(t *testing.T) {
+func TestOutcomeTool_ExistsForAllSevenAgentKinds(t *testing.T) {
 	for _, p := range outcomeProfiles {
 		tl, ok := OutcomeTool(p)
 		require.True(t, ok, "profile %q must have a submit_outcome; a pod with no terminal tool cannot finish its Task", p)
-		require.Equal(t, "submit_outcome", tl.Name, "one name, six schemas")
+		require.Equal(t, "submit_outcome", tl.Name, "one name, seven schemas")
 	}
+}
+
+// TestOutcome_UpgradeRefusesTheGateActions: the upgrade agent has no approval
+// gate. It is a scheduled kind, nobody filed an issue for it, and there is no
+// maintainer comment to cite. Its outcome is the submitted/declined pair and
+// nothing else - approved/discuss/rejected are refused exactly as hard as
+// they are for documentation.
+func TestOutcome_UpgradeRefusesTheGateActions(t *testing.T) {
+	tool, ok := OutcomeTool("upgrade")
+	require.True(t, ok, "upgrade profile must have submit_outcome")
+	for _, action := range []string{"approved", "discuss", "rejected"} {
+		_, _, _, err := tool.Build(map[string]any{"task": "t", "action": action, "reason": "r"})
+		require.Error(t, err, "action=%s must be refused for the upgrade profile", action)
+	}
+}
+
+func TestOutcome_UpgradeSubmittedCarriesMergeOrder(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t")
+	tool, _ := OutcomeTool("upgrade")
+	_, _, body, err := tool.Build(map[string]any{
+		"task": "t", "action": "submitted",
+		"title": "chore: cilium 1.16 -> 1.17", "body": "hop 1 of 4",
+		"change_significance": "minor",
+		"merge_order":         []any{"charts", "helmfile"},
+	})
+	require.NoError(t, err)
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	require.Equal(t, "upgrade", env.Kind)
+	require.Contains(t, env.Payload, "mergeOrder", "merge_order must map to the camelCase mergeOrder wire field")
+	require.Contains(t, env.Payload, "changeSignificance", "change_significance must map to changeSignificance")
 }
 
 func TestOutcomeTool_EmptyAndUnknownProfileHaveNone(t *testing.T) {
