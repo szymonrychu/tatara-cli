@@ -10,14 +10,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var outcomeProfiles = []string{"brainstorm", "incident", "implement", "review", "refine", "documentation"}
+// outcomeProfiles is derived from AgentKinds() rather than hand-listed: every
+// schema-golden and existence test below keys off it, so a kind added to
+// profiles but omitted here would otherwise go untested and silently green.
+var outcomeProfiles = AgentKinds()
 
-func TestOutcomeTool_ExistsForAllSixAgentKinds(t *testing.T) {
+func TestOutcomeTool_ExistsForAllSevenAgentKinds(t *testing.T) {
 	for _, p := range outcomeProfiles {
 		tl, ok := OutcomeTool(p)
 		require.True(t, ok, "profile %q must have a submit_outcome; a pod with no terminal tool cannot finish its Task", p)
-		require.Equal(t, "submit_outcome", tl.Name, "one name, six schemas")
+		require.Equal(t, "submit_outcome", tl.Name, "one name, seven schemas")
 	}
+}
+
+// TestOutcome_UpgradeRefusesTheGateActions: the upgrade agent has no approval
+// gate. It is a scheduled kind, nobody filed an issue for it, and there is no
+// maintainer comment to cite. Its outcome is the submitted/declined pair and
+// nothing else - approved/discuss/rejected are refused exactly as hard as
+// they are for documentation.
+func TestOutcome_UpgradeRefusesTheGateActions(t *testing.T) {
+	tool, ok := OutcomeTool("upgrade")
+	require.True(t, ok, "upgrade profile must have submit_outcome")
+	for _, action := range []string{"approved", "discuss", "rejected"} {
+		_, _, _, err := tool.Build(map[string]any{"task": "t", "action": action, "reason": "r"})
+		require.ErrorContains(t, err, "action must be one of submitted|declined", "action=%s must be refused for the upgrade profile", action)
+	}
+}
+
+func TestOutcome_UpgradeSubmittedCarriesMergeOrder(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t")
+	tool, _ := OutcomeTool("upgrade")
+	_, _, body, err := tool.Build(map[string]any{
+		"task": "t", "action": "submitted",
+		"title": "chore: cilium 1.16 -> 1.17", "body": "hop 1 of 4",
+		"change_significance": "minor",
+		"merge_order":         []any{"charts", "helmfile"},
+	})
+	require.NoError(t, err)
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	require.Equal(t, "upgrade", env.Kind)
+	require.Contains(t, env.Payload, "mergeOrder", "merge_order must map to the camelCase mergeOrder wire field")
+	require.Contains(t, env.Payload, "changeSignificance", "change_significance must map to changeSignificance")
+	require.NotContains(t, env.Payload, "merge_order", "a mapper that copied instead of renamed must not pass")
+	require.NotContains(t, env.Payload, "change_significance", "a mapper that copied instead of renamed must not pass")
 }
 
 func TestOutcomeTool_EmptyAndUnknownProfileHaveNone(t *testing.T) {
@@ -127,7 +167,7 @@ func TestOutcome_ImplementDeclineMapsReason(t *testing.T) {
 
 func TestOutcome_ImplementGates(t *testing.T) {
 	t.Setenv("TATARA_TASK", "t1")
-	for _, profile := range []string{"implement", "documentation"} {
+	for _, profile := range []string{"implement", "documentation", "upgrade"} {
 		tl, _ := OutcomeTool(profile)
 		t.Run(profile+"/no action", func(t *testing.T) {
 			_, _, _, err := tl.Build(map[string]any{"title": "t", "body": "b", "change_significance": "patch"})

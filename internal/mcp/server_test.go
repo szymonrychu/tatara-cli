@@ -33,7 +33,9 @@ import (
 // mr_write, so it cannot be 20 out of a 20-tool surface). The table is
 // normative; these are its counts. The clarify row is deleted at contract 4;
 // implement is 18, not the summary's 17, because clarify's issue_write folded
-// into it.
+// into it. upgrade (16) is new at 2026-08-13, not part of the original D.6
+// table: implement's code/memory grants plus mr_write, minus issue_write and
+// task_list.
 var profileToolCounts = map[string]int{
 	"brainstorm":    17,
 	"incident":      18,
@@ -41,6 +43,7 @@ var profileToolCounts = map[string]int{
 	"review":        16,
 	"refine":        13,
 	"documentation": 18,
+	"upgrade":       16,
 }
 
 // readLines reads a golden file into a sorted slice, skipping blanks/comments.

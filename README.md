@@ -73,9 +73,12 @@ always-on six, with no `submit_outcome` - that pod cannot terminate its Task.
 | review | | x | | x | x | x (4) | x | | | | x | **16** |
 | refine | x | x | x | x | | | x | | | | x | **13** |
 | documentation | | x | | x | | x (4) | x | x | x | x | x | **18** |
+| upgrade | | x | | x | | x (4) | x | x | | | x | **16** |
 
-`clarify` was a seventh profile until contract 4. It is deleted, not
-aliased: its three decisions became `approved`/`discuss`/`rejected` actions
+`clarify` was a seventh profile until contract 4, when it was folded into
+`implement` and deleted. `upgrade` is the seventh profile as of 2026-08-13:
+this table is once again seven rows for seven agent kinds, not six.
+`clarify`'s three decisions became `approved`/`discuss`/`rejected` actions
 on the implement `submit_outcome`, and its `issue_write` plus memory-recall
 grants folded into the implement profile.
 

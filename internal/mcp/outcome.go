@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The six submit_outcome schemas, contract D.1, copied verbatim. The
+// The submit_outcome schemas, contract D.1, copied verbatim. The
 // description strings are the only documentation the model gets, and several of
 // them (merge_order, reviewed_shas) are the sole warning about a failure mode
 // with no other guard rail. Do not shorten them.
@@ -107,7 +107,7 @@ const refineOutcomeSchema = `{"type":"object","properties":{
     "required":["repo","number"]}}},
  "required":[],"additionalProperties":false}`
 
-// outcomeSchemas is contract D.1: one tool name, six schemas, chosen from
+// outcomeSchemas is contract D.1: one tool name, seven schemas, chosen from
 // TATARA_TOOL_PROFILE at registration time. An agent cannot pick the wrong
 // outcome tool because it only ever has one. This is what breaks the
 // byte-identical-tools/list prompt-cache optimisation, and it is worth it.
@@ -123,6 +123,10 @@ var outcomeSchemas = map[string]json.RawMessage{
 	"brainstorm":    json.RawMessage(brainstormOutcomeSchema),
 	"incident":      json.RawMessage(incidentOutcomeSchema),
 	"refine":        json.RawMessage(refineOutcomeSchema),
+	// upgrade REUSES documentationOutcomeSchema deliberately: both are gate-less
+	// code kinds whose action enum is submitted|declined. Duplicating the const
+	// would let the two drift on a field nobody meant to change independently.
+	"upgrade": json.RawMessage(documentationOutcomeSchema),
 }
 
 // outcomeDescriptions is the per-profile tool description. The review one is
@@ -136,6 +140,7 @@ var outcomeDescriptions = map[string]string{
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, action=skip with a reason when nothing is worth proposing THIS cycle (transient - expect something the next session), or action=exhausted with a reason when nothing is worth proposing until the project itself changes (PAUSES brainstorming for this project until it does - use sparingly, only when you genuinely mean for scheduling to hold). A silent finish is not allowed.",
 	"incident":      "Finish this incident task. action=file_issue with the issue to open, action=false_positive, or action=comment_issue with comment{repo,number,body} to append fresh evidence to an existing open tracker when this alert is the SAME incident as one you found while surveying. All three require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
+	"upgrade":       "Finish this upgrade turn. action=submitted with the MR title, the MR body and the change_significance you own, plus merge_order when this upgrade spans more than one repo - merge_order is the DEPENDENCY order the repos merge in and there is no default, so getting it backwards ships a chart against an image tag that never published. action=declined with a decline_reason when no upgrade unit is worth taking this cycle, or when the one you picked turns out to be unsafe. declined is a correct and common answer. This is the only way an upgrade task terminates.",
 }
 
 // outcomeArgMap renames the snake_case tool args to the camelCase wire fields
@@ -212,7 +217,7 @@ func validateOutcome(profile string, a map[string]any) error {
 	switch profile {
 	case "implement":
 		return validateImplementOutcome(a)
-	case "documentation":
+	case "documentation", "upgrade":
 		return validateDocumentationOutcome(a)
 	case "review":
 		return validateReviewOutcome(a)
