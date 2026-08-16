@@ -1,7 +1,7 @@
 # ROADMAP.md
 
-Component-local roadmap for tatara-cli. Phase-level platform roadmap
-lives in `~/Documents/tatara/ROADMAP.md`.
+Component-local roadmap for tatara-cli. Each repo carries its own
+`ROADMAP.md`; there is no parent repo.
 
 Statuses: `planned`, `in progress`, `shipped`.
 
