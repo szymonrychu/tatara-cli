@@ -13,14 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // discardLogger returns a *slog.Logger that discards all output. Use for tests
@@ -659,16 +656,12 @@ func TestReportInternalIssue_DefaultSeverityIsError(t *testing.T) {
 	require.Contains(t, result, "severity=error")
 }
 
-func TestReportInternalIssue_IncrementMetric(t *testing.T) {
+// The description is the agent's contract with the tool. This process emits no
+// metrics, so promising one is a lie the agent cannot check.
+func TestReportInternalIssue_DescriptionPromisesNoMetric(t *testing.T) {
 	tl := platformToolByName(t, "report_internal_issue")
-	before := testutil.ToFloat64(obs.InternalIssueTotal.With(prometheus.Labels{"category": "other", "severity": "error"}))
-	_, err := tl.Handler(map[string]any{
-		"category":    "other",
-		"description": "test metric increment",
-	}, discardLogger())
-	require.NoError(t, err)
-	after := testutil.ToFloat64(obs.InternalIssueTotal.With(prometheus.Labels{"category": "other", "severity": "error"}))
-	require.Equal(t, before+1, after, "InternalIssueTotal must increment on handler call")
+	require.NotContains(t, tl.Description, "metric",
+		"report_internal_issue emits a log, not a metric: nothing gathers this registry")
 }
 
 func TestReportInternalIssue_LogLevel(t *testing.T) {

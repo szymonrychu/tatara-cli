@@ -16,14 +16,11 @@ import (
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // profileToolCounts is contract D.6's gating TABLE, counted (the always-on six,
@@ -312,12 +309,58 @@ func TestRegister_LogsResourceID(t *testing.T) {
 	assert.Contains(t, logged, "mem-42", "resource_id must equal the id arg")
 }
 
-// TestRegister_MetricsIncremented verifies that a successful tool call
-// increments ToolCallsTotal{tool, "ok"} (hard rule 13).
-func TestRegister_MetricsIncremented(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+const testAuthNote = "auth: MCP server started UNAUTHENTICATED (stage=token_status)"
+
+// The tool result text is the only channel out of this process that provably
+// reaches Loki (the wrapper tails the transcript). A pod that started without
+// credentials must say so where an operator can read it - on the error results
+// that are already anomalous, and nowhere else.
+func TestRegister_AuthNoteRidesErrorResults(t *testing.T) {
+	// 400 is a client error: it does not latch the memory degraded state, so it
+	// stays an ordinary error tool result.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
+	}))
+	defer backend.Close()
+
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm",
+		WithAuthNote(testAuthNote))
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.True(t, res.IsError, "a 400 from the backend must surface as an error tool result")
+	assert.Contains(t, resultText(t, res), testAuthNote, "the auth note must ride the error result")
+}
+
+// Healthy turns pay no context tax: a successful result is byte-identical to
+// what an authenticated server returns.
+func TestRegister_AuthNoteAbsentFromSuccessfulResults(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm",
+		WithAuthNote(testAuthNote))
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.False(t, res.IsError)
+	assert.NotContains(t, resultText(t, res), testAuthNote, "a successful result must not carry the auth note")
+}
+
+// With credentials resolved there is no note at all, so an error result is
+// exactly the backend's message.
+func TestRegister_NoAuthNoteLeavesErrorResultUnchanged(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
 	}))
 	defer backend.Close()
 
@@ -326,10 +369,9 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
 
-	before := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
-	_ = callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
-	after := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
-	assert.Equal(t, before+1, after, "ToolCallsTotal must increment on success")
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.True(t, res.IsError)
+	assert.NotContains(t, resultText(t, res), "UNAUTHENTICATED")
 }
 
 // startClient wires an in-process MCP client against srv and completes the
