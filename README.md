@@ -1,10 +1,10 @@
 # tatara-cli
 
-> Part of the tatara platform - see ARCHITECTURE.md in the tatara repo.
+> Part of the tatara platform - see `CLAUDE.md` for the repo map.
 
 tatara platform CLI: OIDC device flow, REST passthrough, stdio MCP server.
 
-Architecture: [github.com/szymonrychu/tatara/blob/main/ARCHITECTURE.md](https://github.com/szymonrychu/tatara/blob/main/ARCHITECTURE.md)
+Architecture: [tatara-documentation](https://szymonrychu.github.io/tatara-documentation/)
 
 ## Install
 
