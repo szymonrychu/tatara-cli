@@ -2,15 +2,13 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
@@ -18,30 +16,59 @@ import (
 	"github.com/szymonrychu/tatara-cli/internal/mcp"
 )
 
+// mcpCreds is everything resolveMCPToken worked out about this pod's identity.
+type mcpCreds struct {
+	token     *auth.Token
+	tokenPath string
+	ccRefresh func(context.Context, *auth.Token) (*auth.Token, error)
+	// authNote is empty when credentials resolved. When they did not, it says
+	// WHY, and mcp.WithAuthNote carries it out on error tool results - the only
+	// channel that leaves this process (see WithAuthNote).
+	authNote string
+}
+
+// unauthenticatedNote renders the reason this pod has no credentials into one
+// operator-readable line. The client-credentials mint is the primary auth path
+// for every agent pod and has nine failure branches; MintError.Stage is what
+// turns "every tool call 401s" into a cause.
+func unauthenticatedNote(err error) string {
+	reason := err.Error()
+	if errors.Is(err, auth.ErrNoToken) {
+		reason = "no stored token and no OIDC client-credentials env " +
+			"(OIDC_ISSUER / CLI_OIDC_CLIENT_ID / CLI_OIDC_CLIENT_SECRET); run `tatara login` or inject them"
+	}
+	return "[tatara-mcp] auth: this MCP server started UNAUTHENTICATED - " + reason +
+		". Backend tool calls will keep failing until credentials exist. This is a platform fault: " +
+		"report it once with report_internal_issue(category=\"auth\"), which needs no auth."
+}
+
 // resolveMCPToken loads credentials for the MCP server without failing when
 // none are present. Static MCP capabilities (tools/list) need no auth; only
 // actual backend calls do. With no stored token and no client-credentials it
 // returns a nil token so the server still starts and advertises its tools;
-// individual tool invocations then fail until credentials exist.
+// individual tool invocations then fail until credentials exist, carrying
+// mcpCreds.authNote so the cause travels with the symptom.
 //
 // For the client-credentials case the token expiry is set so that
 // ensureFreshLocked can compute meaningful freshness, and a cc-refresh func is
-// returned via the second return value so callers can wire it into the client
-// Config - without this the long-lived MCP server would get 401s after the
-// (commonly ~5 min) cc token expires.
-func resolveMCPToken(ctx context.Context, logger *slog.Logger) (*auth.Token, string, func(context.Context, *auth.Token) (*auth.Token, error)) {
+// returned so callers can wire it into the client Config - without this the
+// long-lived MCP server would get 401s after the (commonly ~5 min) cc token
+// expires.
+func resolveMCPToken(ctx context.Context, logger *slog.Logger) mcpCreds {
 	tokenPath, err := auth.DefaultTokenPath()
 	if err != nil {
-		logger.Warn("mcp: cannot resolve token path; starting unauthenticated", "reason", err.Error())
-		return nil, "", nil
+		logger.Warn("mcp: cannot resolve token path; starting unauthenticated",
+			"action", "auth_unresolved", "reason", err.Error())
+		return mcpCreds{authNote: unauthenticatedNote(err)}
 	}
 	if token, lerr := auth.LoadToken(tokenPath); lerr == nil {
-		return token, tokenPath, nil
+		return mcpCreds{token: token, tokenPath: tokenPath}
 	}
 	tokStr, exp, ccErr := auth.AccessTokenWithExpiry(ctx)
 	if ccErr != nil {
-		logger.Warn("mcp: no credentials; starting unauthenticated, tool calls fail until `tatara login` or OIDC env is set", "reason", ccErr.Error())
-		return nil, "", nil
+		logger.Warn("mcp: no credentials; starting unauthenticated, tool calls fail until `tatara login` or OIDC env is set",
+			"action", "auth_unresolved", "stage", auth.MintStage(ccErr), "reason", ccErr.Error())
+		return mcpCreds{authNote: unauthenticatedNote(ccErr)}
 	}
 	ccRefresh := func(ctx context.Context, _ *auth.Token) (*auth.Token, error) {
 		s, e, err := auth.AccessTokenWithExpiry(ctx)
@@ -50,7 +77,10 @@ func resolveMCPToken(ctx context.Context, logger *slog.Logger) (*auth.Token, str
 		}
 		return &auth.Token{AccessToken: s, ExpiresAt: e, TokenType: "Bearer"}, nil
 	}
-	return &auth.Token{AccessToken: tokStr, ExpiresAt: exp, TokenType: "Bearer"}, "", ccRefresh
+	return mcpCreds{
+		token:     &auth.Token{AccessToken: tokStr, ExpiresAt: exp, TokenType: "Bearer"},
+		ccRefresh: ccRefresh,
+	}
 }
 
 func newMCPCmd() *cobra.Command {
@@ -79,7 +109,7 @@ func newMCPCmd() *cobra.Command {
 			memEnv, memEnvSet := os.LookupEnv("TATARA_MEMORY_URL")
 			base := client.ResolveMemoryURL(baseFlag, memEnv, memEnvSet, fileCfg, project)
 
-			token, tokenPath, ccRefresh := resolveMCPToken(ctx, logger)
+			creds := resolveMCPToken(ctx, logger)
 
 			// copyToken returns an independent copy so each Client owns its own
 			// token struct; concurrent refresh in one Client never races with another.
@@ -92,14 +122,19 @@ func newMCPCmd() *cobra.Command {
 			}
 
 			wireCreds := func(cfg *client.Config) {
-				if tokenPath != "" {
-					cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(tokenPath) }
+				// Without this the refresh success/failure logging in
+				// internal/client is dead code - nothing else sets cfg.Log, and
+				// a failed refresh is one of the two auth signals with no other
+				// producer anywhere.
+				cfg.Log = logger
+				if creds.tokenPath != "" {
+					cfg.Reload = func() (*auth.Token, error) { return auth.LoadToken(creds.tokenPath) }
 					cfg.Refresh = func(ctx context.Context, t *auth.Token) (*auth.Token, error) {
 						return auth.RefreshToken(ctx, DefaultIssuer, DefaultClientID, t, nil)
 					}
-					cfg.Save = func(t *auth.Token) error { return auth.SaveToken(tokenPath, t) }
-				} else if ccRefresh != nil {
-					cfg.Refresh = ccRefresh
+					cfg.Save = func(t *auth.Token) error { return auth.SaveToken(creds.tokenPath, t) }
+				} else if creds.ccRefresh != nil {
+					cfg.Refresh = creds.ccRefresh
 				}
 			}
 
@@ -113,8 +148,8 @@ func newMCPCmd() *cobra.Command {
 			} else {
 				cliCfg := client.Config{
 					BaseURL:   base,
-					Token:     copyToken(token),
-					TokenPath: tokenPath,
+					Token:     copyToken(creds.token),
+					TokenPath: creds.tokenPath,
 				}
 				wireCreds(&cliCfg)
 				cli, err = client.New(cliCfg)
@@ -127,8 +162,8 @@ func newMCPCmd() *cobra.Command {
 			opBase := client.ResolveOperatorBaseURL(opBaseFlag, os.Getenv("TATARA_OPERATOR_URL"), fileCfg)
 			opCfg := client.Config{
 				BaseURL:   opBase,
-				Token:     copyToken(token),
-				TokenPath: tokenPath,
+				Token:     copyToken(creds.token),
+				TokenPath: creds.tokenPath,
 			}
 			wireCreds(&opCfg)
 			opCli, err := client.New(opCfg)
@@ -145,34 +180,12 @@ func newMCPCmd() *cobra.Command {
 			if toolProfile == "" {
 				toolProfile = os.Getenv("TATARA_TOOL_PROFILE")
 			}
-			srv := mcp.NewServer(cli, opCli, logger, toolProfile)
-
-			metricsAddr, _ := cmd.Flags().GetString("metrics-addr")
-			if metricsAddr != "" {
-				mux := http.NewServeMux()
-				mux.Handle("/metrics", promhttp.Handler())
-				metricsSrv := &http.Server{ //nolint:gosec // user-supplied addr
-					Addr:              metricsAddr,
-					Handler:           mux,
-					ReadHeaderTimeout: 5 * time.Second,
-					ReadTimeout:       10 * time.Second,
-					WriteTimeout:      10 * time.Second,
-					IdleTimeout:       60 * time.Second,
-				}
-				go func() {
-					if serr := metricsSrv.ListenAndServe(); serr != nil && serr != http.ErrServerClosed {
-						logger.Error("metrics server error", "err", serr)
-					}
-				}()
-				defer func() { _ = metricsSrv.Shutdown(context.Background()) }()
-				logger.Info("metrics server started", "addr", metricsAddr)
-			}
+			srv := mcp.NewServer(cli, opCli, logger, toolProfile, mcp.WithAuthNote(creds.authNote))
 
 			return srv.Run(ctx)
 		},
 	}
 	c.Flags().String("operator-base-url", "", "tatara-operator REST base URL (overrides TATARA_OPERATOR_URL and config file)")
-	c.Flags().String("metrics-addr", os.Getenv("TATARA_MCP_METRICS_ADDR"), "TCP address for the /metrics HTTP endpoint (e.g. 127.0.0.1:9090); empty disables it")
 	c.Flags().String("tool-profile", "", "MCP tool profile to serve (overrides TATARA_TOOL_PROFILE env); empty fails closed to the alwaysOn tool set")
 	return c
 }

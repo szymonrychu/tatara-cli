@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // Target identifies which backend client a Tool is dispatched against.
@@ -236,7 +235,7 @@ func PlatformTools() []Tool {
 		},
 		{
 			Name:        "report_internal_issue",
-			Description: "Report a platform-internal issue (tool error, directive contradiction, broken workspace, memory/graph inconsistency, auth problem, or other). Emits a structured ERROR log and increments a metric. Does NOT create a durable GitHub issue. Use this when you detect a systematic problem the platform team should know about.",
+			Description: "Report a platform-internal issue (tool error, directive contradiction, broken workspace, memory/graph inconsistency, auth problem, or other). Emits a structured ERROR log that the wrapper ships to the platform. Does NOT create a durable GitHub issue. Use this when you detect a systematic problem the platform team should know about.",
 			Schema:      json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["tool_error","directive_contradiction","workspace_broken","memory_inconsistent","graph_inconsistent","auth","other"],"description":"Issue category."},"severity":{"type":"string","enum":["warn","error"],"description":"Severity level; defaults to error."},"description":{"type":"string","description":"Human-readable description of the issue. Required and must be non-empty."},"offending_tool":{"type":"string","description":"MCP tool name that triggered the issue, if applicable."},"resource_id":{"type":"string","description":"Resource identifier (task, repo, entity ID) related to the issue, if applicable."}},"required":["category","description"],"additionalProperties":false}`),
 			// No Target or Build; Handler is set below.
 			Handler: func(args map[string]any, log *slog.Logger) (string, error) {
@@ -279,13 +278,12 @@ func PlatformTools() []Tool {
 					logAttrs = append(logAttrs, "task", task)
 				}
 
-				// Log at the appropriate level via the server's injected logger; metric always increments.
+				// Log at the appropriate level via the server's injected logger.
 				if severity == "warn" {
 					log.Warn("internal issue reported", logAttrs...)
 				} else {
 					log.Error("internal issue reported", logAttrs...)
 				}
-				obs.InternalIssueTotal.WithLabelValues(category, severity).Inc()
 
 				return fmt.Sprintf("internal issue reported: category=%s severity=%s", category, severity), nil
 			},

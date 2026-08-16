@@ -203,3 +203,11 @@ records how these rules apply to it.
   manifest from here and fails on an unknown name, so a rename is a
   two-repo change with skills merging after the CLI.
 - No MCP tool exposes merge or review-posting, and none ever should (rule 7).
+- **Rule 13 does not bind here, and a `/metrics` endpoint must not come back.**
+  This binary is not a service: the MCP server is a stdio subprocess Claude Code
+  starts and kills at will, inside an agent pod with no scrape target and no
+  push path. A registry here is gathered by nothing. If a signal from this
+  process has to reach an operator, the channel is the tool result text - the
+  wrapper's transcript tailer ships it to Loki. Not stderr (the MCP client
+  swallows it), not the slog file (the pod's disk dies with the pod). See the
+  2026-08-16 MEMORY.md entry for the measurement.

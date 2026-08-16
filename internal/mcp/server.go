@@ -12,7 +12,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 	"github.com/szymonrychu/tatara-cli/internal/version"
 )
 
@@ -33,6 +32,27 @@ type Server struct {
 	// mem tracks whether the memory backend is usable, so every TargetMemory
 	// tool can answer with guidance instead of a bare transport error.
 	mem *memoryState
+	// authNote is empty on the happy path. When the server started without
+	// credentials it carries the operator-facing reason, prefixed onto ERROR
+	// tool results only - see WithAuthNote.
+	authNote string
+}
+
+// Option configures a Server at construction.
+type Option func(*Server)
+
+// WithAuthNote attaches an operator-facing note to every ERROR tool result.
+//
+// This process has no metrics egress and no log egress: the MCP client captures
+// a stdio server's stderr into its own cache directory and never forwards it,
+// and the slog file handler writes to a disk that dies with the pod. The ONE
+// channel that provably reaches Loki is the tool result text, which the
+// wrapper's transcript tailer ships. So an auth failure - the only signal here
+// with no other producer anywhere - rides out on the results that are already
+// anomalous. Successful results are untouched, so a healthy turn costs the
+// agent no extra context.
+func WithAuthNote(note string) Option {
+	return func(s *Server) { s.authNote = note }
 }
 
 // NewServer builds the stdio MCP server for one agent pod.
@@ -60,7 +80,7 @@ type Server struct {
 // backend at all. The nine TargetMemory tools are still registered in that case
 // (the surface stays stable, and the agent needs them to see what it lost and
 // report it); they answer with the MEMORY_DEGRADED guidance and never dispatch.
-func NewServer(memory, operator *client.Client, log *slog.Logger, profile string) *Server {
+func NewServer(memory, operator *client.Client, log *slog.Logger, profile string, opts ...Option) *Server {
 	allow := resolveProfile(profile, log)
 	s := &Server{
 		srv:      server.NewMCPServer("tatara", version.Version, server.WithToolCapabilities(true)),
@@ -70,6 +90,13 @@ func NewServer(memory, operator *client.Client, log *slog.Logger, profile string
 		profile:  profile,
 		allow:    allow,
 		mem:      newMemoryState(memory != nil),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.authNote != "" {
+		log.Warn("mcp server is unauthenticated; the reason rides out on error tool results",
+			"action", "auth_unresolved", "note", s.authNote)
 	}
 	if reason, ok := s.mem.degraded(); ok {
 		log.Warn("tatara-memory is degraded; memory tools will return guidance instead of calling it",
@@ -93,11 +120,6 @@ func NewServer(memory, operator *client.Client, log *slog.Logger, profile string
 		s.registered = append(s.registered, t.Name)
 	}
 
-	profileLabel := profile
-	if profileLabel == "" {
-		profileLabel = "none"
-	}
-	obs.RegisteredTools.WithLabelValues(profileLabel).Set(float64(s.toolCount))
 	log.Info("mcp tool surface resolved",
 		"action", "tools_registered", "profile", profile, "count", s.toolCount)
 	return s
@@ -157,9 +179,8 @@ func (s *Server) register(t Tool) {
 		// because all agent pods share ONE OIDC identity, which makes the
 		// allow-set the authz boundary, and a boundary gets two checks.
 		if !s.allow[t.Name] {
-			obs.ToolCallsTotal.WithLabelValues(t.Name, "denied").Inc()
 			s.log.Warn("tool call denied: not in profile allow-set", "tool", t.Name, "profile", s.profile, "resource_id", rid)
-			return mcplib.NewToolResultError(fmt.Sprintf("tool %q is not permitted for profile %q", t.Name, s.profile)), nil
+			return s.errorResult(fmt.Sprintf("tool %q is not permitted for profile %q", t.Name, s.profile)), nil
 		}
 
 		// Contract J, RESIDUE 1: refine holds mr_write for action=comment only.
@@ -168,9 +189,8 @@ func (s *Server) register(t Tool) {
 		// /scm/mr-write.
 		if t.Name == "mr_write" {
 			if err := checkRefineMRWrite(s.profile, args); err != nil {
-				obs.ToolCallsTotal.WithLabelValues(t.Name, "denied").Inc()
 				s.log.Warn("tool call denied: refine mr_write is comment-only", "tool", t.Name, "profile", s.profile, "resource_id", rid)
-				return mcplib.NewToolResultError(err.Error()), nil
+				return s.errorResult(err.Error()), nil
 			}
 		}
 
@@ -178,13 +198,10 @@ func (s *Server) register(t Tool) {
 		if t.Handler != nil {
 			result, err := t.Handler(args, s.log)
 			elapsedMs := float64(time.Since(start).Milliseconds())
-			obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
 			if err != nil {
-				obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
 				s.log.Error("tool error", "tool", t.Name, "duration_ms", elapsedMs, "resource_id", rid, "err", err)
-				return mcplib.NewToolResultError(err.Error()), nil
+				return s.errorResult(err.Error()), nil
 			}
-			obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
 			s.log.Info("tool call", "tool", t.Name, "duration_ms", elapsedMs, "resource_id", rid, "status", "ok")
 			return mcplib.NewToolResultText(result), nil
 		}
@@ -196,15 +213,12 @@ func (s *Server) register(t Tool) {
 		// but runs locally, and the guidance tells the agent to call it.
 		if t.Target == TargetMemory {
 			if reason, ok := s.mem.degraded(); ok {
-				elapsedMs := float64(time.Since(start).Milliseconds())
-				obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
-				return s.degradedResult(t.Name, reason, rid, elapsedMs), nil
+				return s.degradedResult(t.Name, reason, rid, float64(time.Since(start).Milliseconds())), nil
 			}
 		}
 
 		body, err := Invoke(ctx, s.clientFor(t), t, args)
 		elapsedMs := float64(time.Since(start).Milliseconds())
-		obs.ToolCallDurationMs.WithLabelValues(t.Name).Observe(elapsedMs)
 		if err != nil {
 			// A transport failure or 5xx against memory latches: the outage
 			// started mid-turn, and every later memory call is answered from
@@ -212,11 +226,9 @@ func (s *Server) register(t Tool) {
 			if t.Target == TargetMemory && memoryBackendDown(err) {
 				return s.degradedResult(t.Name, s.mem.latch(err), rid, elapsedMs), nil
 			}
-			obs.ToolCallsTotal.WithLabelValues(t.Name, "error").Inc()
 			s.log.Error("tool error", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "resource_id", rid, "err", err)
-			return mcplib.NewToolResultError(err.Error()), nil
+			return s.errorResult(err.Error()), nil
 		}
-		obs.ToolCallsTotal.WithLabelValues(t.Name, "ok").Inc()
 		s.log.Info("tool call", "tool", t.Name, "target", t.Target, "duration_ms", elapsedMs, "resource_id", rid, "status", "ok")
 		if len(body) == 0 {
 			return mcplib.NewToolResultText(`{"ok":true}`), nil
@@ -230,13 +242,22 @@ func (s *Server) register(t Tool) {
 	})
 }
 
+// errorResult builds an error tool result, prefixing the auth note when the
+// server started without credentials. The note is what turns "every tool call
+// 401s" into "the client_credentials mint failed at stage X" for whoever reads
+// the transcript in Loki.
+func (s *Server) errorResult(msg string) *mcplib.CallToolResult {
+	if s.authNote != "" {
+		msg = s.authNote + "\n" + msg
+	}
+	return mcplib.NewToolResultError(msg)
+}
+
 // degradedResult renders the MEMORY_DEGRADED guidance as a normal tool result,
 // following the head-moved carve-out in Invoke: the agent is being told what to
 // do next, not that it made a mistake, and the operator's prompt guidance
 // already says to carry on with reduced recall.
-// The caller observes ToolCallDurationMs; this only counts the outcome.
 func (s *Server) degradedResult(tool, reason, rid string, elapsedMs float64) *mcplib.CallToolResult {
-	obs.ToolCallsTotal.WithLabelValues(tool, "degraded").Inc()
 	s.log.Warn("memory tool answered from the degraded path",
 		"tool", tool, "duration_ms", elapsedMs, "resource_id", rid, "reason", reason)
 	return mcplib.NewToolResultText(s.mem.report(tool, reason))

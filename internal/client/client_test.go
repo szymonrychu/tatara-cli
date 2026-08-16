@@ -461,24 +461,49 @@ func TestClient_ConcurrentDo_NoDataRace(t *testing.T) {
 	}
 }
 
-// TestClient_DoEmitsMetric verifies that a successful Do call increments the
-// obs.TokenRefreshTotal counter when a near-expiry refresh occurs (finding 2).
-func TestClient_DoEmitsMetric(t *testing.T) {
-	newToken := &auth.Token{
-		AccessToken: "metered",
-		ExpiresAt:   time.Now().Add(1 * time.Hour),
-		TokenType:   "Bearer",
-	}
-	srv, cleanup := testServer(func(w http.ResponseWriter, r *http.Request) {
+// A failed token refresh is one of two auth signals with no other producer
+// anywhere, and no metric leaves this process - so it has to be logged, and the
+// staged cause has to survive into the error the caller wraps into the tool
+// result text.
+func TestClient_RefreshFailureIsLoggedAndCarriesTheCause(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	defer cleanup()
 
+	var buf bytes.Buffer
 	c, err := New(Config{
 		BaseURL: srv.URL,
 		Token:   nearExpiryToken(),
+		Log:     slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})),
 		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
-			return newToken, nil
+			return nil, &auth.MintError{Stage: "token_status", Err: errors.New("status 401")}
+		},
+	})
+	require.NoError(t, err)
+
+	_, doErr := c.Do(context.Background(), http.MethodGet, "/", nil)
+	require.Error(t, doErr)
+	require.Contains(t, doErr.Error(), "stage=token_status",
+		"the mint stage must survive into the error the tool result carries")
+	require.Contains(t, buf.String(), "token refresh failed")
+	require.Contains(t, buf.String(), "stage=token_status")
+}
+
+// A successful refresh logs at INFO so the transcript shows the self-heal.
+func TestClient_RefreshSuccessIsLogged(t *testing.T) {
+	srv, cleanup := testServer(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	c, err := New(Config{
+		BaseURL: srv.URL,
+		Token:   nearExpiryToken(),
+		Log:     slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		Refresh: func(_ context.Context, _ *auth.Token) (*auth.Token, error) {
+			return &auth.Token{AccessToken: "fresh", ExpiresAt: time.Now().Add(time.Hour), TokenType: "Bearer"}, nil
 		},
 	})
 	require.NoError(t, err)
@@ -486,7 +511,7 @@ func TestClient_DoEmitsMetric(t *testing.T) {
 	resp, err := c.Do(context.Background(), http.MethodGet, "/", nil)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	// Metric call is a side effect; just assert no panic and success.
+	require.Contains(t, buf.String(), "token refreshed")
 }
 
 // TestClient_NoLoggerSafe verifies that nil logger (default) does not panic
