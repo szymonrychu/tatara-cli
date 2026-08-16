@@ -196,7 +196,6 @@ is local to this repo and is never touched by the sync, which is where a repo
 records how these rules apply to it.
 <!-- END tatara-shared-contract -->
 
-
 ## Local notes
 
 - Adding, renaming or removing an MCP tool breaks skills that document it.
