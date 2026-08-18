@@ -1,11 +1,12 @@
 {"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["submitted","declined"]},
+  "action":{"type":"string","enum":["submitted","declined","discuss"]},
   "title":{"type":"string","description":"MR title. Required when action=submitted."},
   "body":{"type":"string","description":"MR body. Required when action=submitted."},
   "change_significance":{"type":"string","enum":["major","minor","patch"],
     "description":"Required when action=submitted. major=backward-incompatible; minor=backward-compatible feature; patch=fix. YOU own this level - a reviewer may raise it but can never lower it."},
   "merge_order":{"type":"array","items":{"type":"string"},
     "description":"REQUIRED when this task's MRs span more than one repo: the Repository CR names in dependency order, first-merged first. There is NO default. Get it wrong and a downstream repo ships against an API that has not merged yet."},
-  "decline_reason":{"type":"string","description":"Required when action=declined."}},
+  "decline_reason":{"type":"string","description":"Required when action=declined."},
+  "reason":{"type":"string","description":"Required when action=discuss: why you are pausing instead of finishing this turn with submitted or declined. The operator parks the task awaiting human input; the next human comment on an owned issue or MR resumes it."}},
  "required":["action"],"additionalProperties":false}

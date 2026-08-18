@@ -34,18 +34,23 @@ const implementOutcomeSchema = `{"type":"object","properties":{
 // documentationOutcomeSchema was implementOutcomeSchema until the clarify
 // fold. It is now its OWN const: implement's action enum grew the three
 // approval-gate actions, and a documentation agent has no gate to drive - it
-// writes docs and opens an MR. Sharing the const would have handed it three
-// actions its operator-side handler has no branch for.
+// writes docs and opens an MR, or holds the conversation open with discuss.
+// Sharing the const would have handed it the two GATE actions (approved,
+// rejected) its operator-side handler has no branch for. discuss is not one
+// of those: it grants nothing and closes nothing, it is the same
+// awaiting-human pause implement uses when the agent needs a human call
+// before it can pick submitted or declined (G6/H1-B).
 const documentationOutcomeSchema = `{"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["submitted","declined"]},
+  "action":{"type":"string","enum":["submitted","declined","discuss"]},
   "title":{"type":"string","description":"MR title. Required when action=submitted."},
   "body":{"type":"string","description":"MR body. Required when action=submitted."},
   "change_significance":{"type":"string","enum":["major","minor","patch"],
     "description":"Required when action=submitted. major=backward-incompatible; minor=backward-compatible feature; patch=fix. YOU own this level - a reviewer may raise it but can never lower it."},
   "merge_order":{"type":"array","items":{"type":"string"},
     "description":"REQUIRED when this task's MRs span more than one repo: the Repository CR names in dependency order, first-merged first. There is NO default. Get it wrong and a downstream repo ships against an API that has not merged yet."},
-  "decline_reason":{"type":"string","description":"Required when action=declined."}},
+  "decline_reason":{"type":"string","description":"Required when action=declined."},
+  "reason":{"type":"string","description":"Required when action=discuss: why you are pausing instead of finishing this turn with submitted or declined. The operator parks the task awaiting human input; the next human comment on an owned issue or MR resumes it."}},
  "required":["action"],"additionalProperties":false}`
 
 const reviewOutcomeSchema = `{"type":"object","properties":{
@@ -135,12 +140,12 @@ var outcomeSchemas = map[string]json.RawMessage{
 // a forge review event. It is not.
 var outcomeDescriptions = map[string]string{
 	"implement":     "Finish this implement turn. Five actions. action=approved reports that you have the go-ahead on the plan you wrote: always set reason and plan_note_id, plus approving_maintainer AND approval_citations when a human comment is the go-ahead (omit both only when tatara proposed this issue itself and nobody has commented). The operator re-reads the cited comment and refuses if the citation does not hold up - a refusal is a normal result, not an error, and you keep talking. action=discuss holds the conversation open with a reason. action=rejected closes the issue with a reason. action=submitted opens the MR with the title, body and change_significance you own (plus merge_order when this task's MRs span more than one repo). action=declined declines the work with a decline_reason. This is the only way an implement task terminates.",
-	"documentation": "Finish this documentation task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), or action=declined with a decline_reason. This is the only way a documentation task terminates.",
+	"documentation": "Finish this documentation task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), action=declined with a decline_reason, or action=discuss with a reason to pause and hold the conversation open instead of forcing submitted or declined this turn. This is the only way a documentation task terminates (discuss does not terminate it - it parks awaiting a human).",
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, action=skip with a reason when nothing is worth proposing THIS cycle (transient - expect something the next session), or action=exhausted with a reason when nothing is worth proposing until the project itself changes (PAUSES brainstorming for this project until it does - use sparingly, only when you genuinely mean for scheduling to hold). A silent finish is not allowed.",
 	"incident":      "Finish this incident task. action=file_issue with the issue to open, action=false_positive, or action=comment_issue with comment{repo,number,body} to append fresh evidence to an existing open tracker when this alert is the SAME incident as one you found while surveying. All three require the alert_rules that fired and a reason. On file_issue, set issue.parent only when the new issue is genuinely-new-but-related to an existing open tracker you found - never for a same-rule duplicate.",
 	"refine":        "Finish this refine task: the member tasks to fold in, the issues to close, and the issues or MRs to link. At least one of the three lists must be non-empty.",
-	"upgrade":       "Finish this upgrade turn. action=submitted with the MR title, the MR body and the change_significance you own, plus merge_order when this upgrade spans more than one repo - merge_order is the DEPENDENCY order the repos merge in and there is no default, so getting it backwards ships a chart against an image tag that never published. action=declined with a decline_reason when no upgrade unit is worth taking this cycle, or when the one you picked turns out to be unsafe. declined is a correct and common answer. This is the only way an upgrade task terminates.",
+	"upgrade":       "Finish this upgrade turn. action=submitted with the MR title, the MR body and the change_significance you own, plus merge_order when this upgrade spans more than one repo - merge_order is the DEPENDENCY order the repos merge in and there is no default, so getting it backwards ships a chart against an image tag that never published. action=declined with a decline_reason when no upgrade unit is worth taking this cycle, or when the one you picked turns out to be unsafe - declined is a correct and common answer. action=discuss with a reason when you need a human call before you can pick either (a breaking-change changelog, an ambiguous version pin) - it pauses rather than terminates. submitted and declined are the only ways an upgrade task terminates.",
 }
 
 // outcomeArgMap renames the snake_case tool args to the camelCase wire fields
@@ -232,11 +237,19 @@ func validateOutcome(profile string, a map[string]any) error {
 	}
 }
 
-// validateCodeOutcome is the submitted/declined half of the outcome contract:
-// the whole of it for documentation, and the two code actions for implement.
-// It is shared rather than copied because the two kinds must not drift on it -
-// silent divergence between two hand-maintained copies of one rule is the bug
-// class this whole change exists to close.
+// validateCodeOutcome is the submitted/declined/discuss half of the outcome
+// contract: the whole of it for documentation and upgrade, and the two MR
+// actions (not discuss - see validateImplementOutcome) for implement. It is
+// shared rather than copied because the kinds must not drift on it - silent
+// divergence between hand-maintained copies of one rule is the bug class this
+// whole change exists to close.
+//
+// discuss here is NOT the approval-gate discuss implement's own switch
+// handles (that one also refuses approving_maintainer/plan_note_id/
+// approval_citations through refuseGateArgs, none of which exist on a code-kind
+// schema in the first place). It is the same "pause and hold the conversation
+// open" verdict, requiring only reason and refusing every MR-shaped field,
+// submitted or declined would otherwise require.
 func validateCodeOutcome(a map[string]any) error {
 	switch argString(a, "action") {
 	case "submitted":
@@ -259,17 +272,25 @@ func validateCodeOutcome(a map[string]any) error {
 			}
 		}
 		return nil
+	case "discuss":
+		if strings.TrimSpace(argString(a, "reason")) == "" {
+			return fmt.Errorf("submit_outcome: reason required when action=discuss")
+		}
+		// refuseCodeArgs, not an inlined five-key list: the inline copy folded
+		// decline_reason into the MR-shaped message and told the agent to move it
+		// to action=submitted, which is the one other action that also refuses it.
+		return refuseCodeArgs(a)
 	case "":
-		return fmt.Errorf("submit_outcome: action required: one of submitted|declined")
+		return fmt.Errorf("submit_outcome: action required: one of submitted|declined|discuss")
 	default:
-		return fmt.Errorf("submit_outcome: action must be one of submitted|declined")
+		return fmt.Errorf("submit_outcome: action must be one of submitted|declined|discuss")
 	}
 }
 
 // validateDocumentationOutcome is deliberately nothing but validateCodeOutcome.
-// A documentation agent writes docs and opens an MR; it has no approval gate to
-// drive, so approved/discuss/rejected are refused here as hard as they are
-// absent from documentationOutcomeSchema.
+// A documentation agent writes docs and opens an MR, or pauses with discuss; it
+// has no approval gate to drive, so approved/rejected are refused here as hard
+// as they are absent from documentationOutcomeSchema.
 func validateDocumentationOutcome(a map[string]any) error {
 	return validateCodeOutcome(a)
 }
@@ -290,12 +311,7 @@ func validateImplementOutcome(a map[string]any) error {
 		if _, ok := a["reason"]; ok {
 			return fmt.Errorf("submit_outcome: reason is only valid when action=approved, discuss or rejected; action=declined carries its reason in decline_reason")
 		}
-		for _, k := range []string{"approving_maintainer", "plan_note_id", "approval_citations"} {
-			if _, ok := a[k]; ok {
-				return fmt.Errorf("submit_outcome: %s is only valid when action=approved", k)
-			}
-		}
-		return nil
+		return refuseGateArgs(a)
 	case "approved":
 		if err := refuseCodeArgs(a); err != nil {
 			return err
@@ -337,7 +353,13 @@ func validateImplementOutcome(a map[string]any) error {
 		if strings.TrimSpace(argString(a, "reason")) == "" {
 			return fmt.Errorf("submit_outcome: reason required when action=%s", action)
 		}
-		return nil
+		// The gate fields belong to action=approved ALONE. The operator refuses
+		// them here too (restapi/outcome.go gate(): 400 unexpected-field,
+		// "approvingMaintainer, planNoteId and approvalCitations are only valid
+		// when action=approved"), so mirroring it client-side costs the agent a
+		// legible error instead of a round trip to be told the same thing - the
+		// same reason submitted/declined refuse them above.
+		return refuseGateArgs(a)
 	case "":
 		return fmt.Errorf("submit_outcome: action required: one of submitted|declined|approved|discuss|rejected")
 	default:
@@ -375,6 +397,20 @@ func checkApprovalPairing(a map[string]any) error {
 		return fmt.Errorf("submit_outcome: approving_maintainer requires approval_citations: name the comment you are reading as the go-ahead, or omit both when tatara proposed this issue and no human has commented")
 	case maintainer == "" && cited:
 		return fmt.Errorf("submit_outcome: approval_citations requires approving_maintainer: declare whose comment you are citing")
+	}
+	return nil
+}
+
+// refuseGateArgs rejects the approval-gate args on any action but approved. It
+// is refuseCodeArgs' mirror image and exists for the same reason: the rule is
+// one rule, refused identically on submitted, declined, discuss and rejected,
+// and four hand-maintained copies of it is how one of them silently loses a
+// field.
+func refuseGateArgs(a map[string]any) error {
+	for _, k := range []string{"approving_maintainer", "plan_note_id", "approval_citations"} {
+		if _, ok := a[k]; ok {
+			return fmt.Errorf("submit_outcome: %s is only valid when action=approved", k)
+		}
 	}
 	return nil
 }

@@ -23,18 +23,77 @@ func TestOutcomeTool_ExistsForAllSevenAgentKinds(t *testing.T) {
 	}
 }
 
-// TestOutcome_UpgradeRefusesTheGateActions: the upgrade agent has no approval
-// gate. It is a scheduled kind, nobody filed an issue for it, and there is no
-// maintainer comment to cite. Its outcome is the submitted/declined pair and
-// nothing else - approved/discuss/rejected are refused exactly as hard as
-// they are for documentation.
-func TestOutcome_UpgradeRefusesTheGateActions(t *testing.T) {
+// TestOutcome_UpgradeRefusesTheApprovalGateActions: the upgrade agent has no
+// approval gate. It is a scheduled kind, nobody filed an issue for it, and
+// there is no maintainer comment to cite. approved/rejected - the approval
+// grant and the issue-close - are refused exactly as hard as they are for
+// documentation. discuss is NOT one of these: it is the escape hatch that
+// lets the agent pause and hold the conversation open instead of being forced
+// to pick submitted or declined every turn (adjacent to G6/H1-B).
+func TestOutcome_UpgradeRefusesTheApprovalGateActions(t *testing.T) {
 	tool, ok := OutcomeTool("upgrade")
 	require.True(t, ok, "upgrade profile must have submit_outcome")
-	for _, action := range []string{"approved", "discuss", "rejected"} {
+	for _, action := range []string{"approved", "rejected"} {
 		_, _, _, err := tool.Build(map[string]any{"task": "t", "action": action, "reason": "r"})
-		require.ErrorContains(t, err, "action must be one of submitted|declined", "action=%s must be refused for the upgrade profile", action)
+		require.ErrorContains(t, err, "action must be one of submitted|declined|discuss", "action=%s must be refused for the upgrade profile", action)
 	}
+}
+
+// TestOutcome_UpgradeDiscussRequiresReason mirrors the documentation case:
+// discuss without a reason is refused, and discuss refuses the MR-shaped
+// fields the same way declined does.
+func TestOutcome_UpgradeDiscussRequiresReason(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tool, _ := OutcomeTool("upgrade")
+
+	_, _, _, err := tool.Build(map[string]any{"action": "discuss"})
+	require.ErrorContains(t, err, "reason required when action=discuss")
+
+	_, _, _, err = tool.Build(map[string]any{"action": "discuss", "reason": "   "})
+	require.ErrorContains(t, err, "reason required when action=discuss", "a whitespace-only reason must not satisfy action=discuss")
+
+	_, _, _, err = tool.Build(map[string]any{
+		"action": "discuss", "reason": "waiting on upstream release notes", "title": "t",
+	})
+	require.Error(t, err, "action=discuss must refuse the MR-shaped fields the same way declined does")
+}
+
+// TestOutcome_UpgradeDiscussBuildsAndParksAwaitingHuman is the wire-level
+// happy path: discuss with a reason builds a valid payload naming the
+// upgrade kind, so the escape the operator (H1-B) now accepts on
+// documentation/upgrade is actually reachable from this cli.
+func TestOutcome_UpgradeDiscussBuildsAndParksAwaitingHuman(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tool, _ := OutcomeTool("upgrade")
+	m, p, body, err := tool.Build(map[string]any{"action": "discuss", "reason": "cilium 1.17 changelog flags a breaking API change; need a human call"})
+	require.NoError(t, err)
+	require.Equal(t, "POST", m)
+	require.Equal(t, "/tasks/t1/outcome", p)
+
+	raw, _ := json.Marshal(body)
+	var env struct {
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env))
+	require.Equal(t, "upgrade", env.Kind)
+	require.Equal(t, "discuss", env.Payload["action"])
+	require.Equal(t, "cilium 1.17 changelog flags a breaking API change; need a human call", env.Payload["reason"])
+}
+
+// TestOutcome_DocumentationDiscussRequiresReason is the documentation twin of
+// TestOutcome_UpgradeDiscussRequiresReason.
+func TestOutcome_DocumentationDiscussRequiresReason(t *testing.T) {
+	t.Setenv("TATARA_TASK", "t1")
+	tool, _ := OutcomeTool("documentation")
+
+	_, _, _, err := tool.Build(map[string]any{"action": "discuss"})
+	require.ErrorContains(t, err, "reason required when action=discuss")
+
+	_, _, _, err = tool.Build(map[string]any{
+		"action": "discuss", "reason": "docs source moved; confirm the new path with a maintainer", "change_significance": "patch",
+	})
+	require.Error(t, err, "action=discuss must refuse change_significance the same way declined refuses title/body/change_significance")
 }
 
 func TestOutcome_UpgradeSubmittedCarriesMergeOrder(t *testing.T) {
@@ -480,16 +539,19 @@ func TestOutcomeTool_HasNoClarifyProfile(t *testing.T) {
 	require.False(t, ok, "clarify is deleted; a pod claiming it must get NO submit_outcome (fail closed)")
 }
 
-// TestOutcome_DocumentationRefusesTheGateActions is the server-side half of
-// TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOnly: the schema is
-// the only thing the model reads, but validateOutcome is what actually stops a
-// documentation pod driving an approval gate it has no handler for.
-func TestOutcome_DocumentationRefusesTheGateActions(t *testing.T) {
-	for _, action := range []string{"approved", "discuss", "rejected"} {
+// TestOutcome_DocumentationRefusesTheApprovalGateActions is the server-side
+// half of TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOrDiscuss:
+// the schema is the only thing the model reads, but validateOutcome is what
+// actually stops a documentation pod driving an approval gate it has no
+// handler for. approved/rejected remain refused; discuss does not belong to
+// the approval gate (it never grants or closes anything) and is validated
+// separately.
+func TestOutcome_DocumentationRefusesTheApprovalGateActions(t *testing.T) {
+	for _, action := range []string{"approved", "rejected"} {
 		err := validateOutcome("documentation", map[string]any{
 			"action": action, "reason": "r", "approving_maintainer": "szymonrychu", "plan_note_id": "n-1",
 		})
-		require.ErrorContains(t, err, "action must be one of submitted|declined")
+		require.ErrorContains(t, err, "action must be one of submitted|declined|discuss")
 	}
 }
 
@@ -819,24 +881,29 @@ func TestImplementSchemaCarriesApprovalCitations(t *testing.T) {
 	}
 }
 
-// TestDocumentationSchemaHasNoGateFields is the other half of the Task 4.1
-// split: documentation must not merely refuse the gate ACTIONS, it must not
-// advertise the gate FIELDS either. additionalProperties is false, so a field
-// absent here is unreachable.
-func TestDocumentationSchemaHasNoGateFields(t *testing.T) {
+// TestDocumentationSchemaHasNoApprovalGateFields is the other half of the
+// Task 4.1 split: documentation must not merely refuse the approval-gate
+// ACTIONS, it must not advertise the approval-gate FIELDS either.
+// additionalProperties is false, so a field absent here is unreachable.
+// "reason" is deliberately NOT in this list any more: it is now the field
+// action=discuss requires, and discuss is not part of the approval gate (it
+// grants nothing and closes nothing).
+func TestDocumentationSchemaHasNoApprovalGateFields(t *testing.T) {
 	tool, ok := OutcomeTool("documentation")
 	require.True(t, ok)
 	var doc struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
 	require.NoError(t, json.Unmarshal(tool.Schema, &doc))
-	for _, k := range []string{"reason", "approving_maintainer", "plan_note_id", "approval_citations"} {
+	for _, k := range []string{"approving_maintainer", "plan_note_id", "approval_citations"} {
 		require.NotContains(t, doc.Properties, k,
 			"documentation has no approval gate; %q must not be reachable from its schema", k)
 	}
+	require.Contains(t, doc.Properties, "reason",
+		"reason must be reachable: it is required by action=discuss")
 }
 
-func TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOnly(t *testing.T) {
+func TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOrDiscuss(t *testing.T) {
 	tool, ok := OutcomeTool("documentation")
 	require.True(t, ok)
 
@@ -848,6 +915,36 @@ func TestOutcome_DocumentationActionEnumIsSubmittedOrDeclinedOnly(t *testing.T) 
 		} `json:"properties"`
 	}
 	require.NoError(t, json.Unmarshal(tool.Schema, &schema))
-	require.ElementsMatch(t, []string{"submitted", "declined"}, schema.Properties.Action.Enum,
-		"a documentation agent has no approval gate to drive; it must never be able to emit approved/discuss/rejected")
+	require.ElementsMatch(t, []string{"submitted", "declined", "discuss"}, schema.Properties.Action.Enum,
+		"a documentation agent has no approval gate to drive; it must never be able to emit approved/rejected, but discuss (the escape hatch) is now reachable")
+}
+
+// TestOutcome_DiscussNamesDeclinedForDeclineReason pins the ACTION the refusal
+// names. The discuss arm used to inline its own five-key list whose one message
+// read "decline_reason is only for action=submitted" - decline_reason belongs to
+// action=declined, and an agent told to move it to `submitted` moves it to the
+// one action that also refuses it.
+func TestOutcome_DiscussNamesDeclinedForDeclineReason(t *testing.T) {
+	for _, profile := range []string{"documentation", "upgrade", "implement"} {
+		require.ErrorContains(t, validateOutcome(profile, map[string]any{
+			"action": "discuss", "reason": "holding for a maintainer", "decline_reason": "no",
+		}), "decline_reason is only for action=declined",
+			"%s: the refusal must name action=declined, not action=submitted", profile)
+	}
+}
+
+// TestOutcome_ImplementDiscussAndRejectedRefuseTheGateFields mirrors the
+// operator's own gate refusal (restapi/outcome.go: "approvingMaintainer,
+// planNoteId and approvalCitations are only valid when action=approved", 400
+// unexpected-field) client-side, so the agent is told locally instead of
+// spending a round trip to be told the same thing.
+func TestOutcome_ImplementDiscussAndRejectedRefuseTheGateFields(t *testing.T) {
+	for _, action := range []string{"discuss", "rejected"} {
+		for _, k := range []string{"approving_maintainer", "plan_note_id", "approval_citations"} {
+			require.ErrorContains(t, validateOutcome("implement", map[string]any{
+				"action": action, "reason": "because", k: "x",
+			}), k+" is only valid when action=approved",
+				"action=%s must refuse %s exactly as the operator does", action, k)
+		}
+	}
 }
