@@ -317,11 +317,12 @@ func Invoke(ctx context.Context, c *client.Client, t Tool, args map[string]any) 
 			return nil, &statusError{resp.StatusCode,
 				fmt.Sprintf("tatara: %s %s -> %d: read body: %v", method, path, resp.StatusCode, err)}
 		}
-		// A 409 with reason=="head-moved" is not a failure: the operator already
-		// refreshed the mirror to the live head and wants the agent to re-review
-		// and resubmit. Render it as a normal tool result, not a tool error.
+		// A 409 whose reason the operator has taught this cli to act on
+		// (head-moved, pr-not-ready) is not a failure: it names exactly what the
+		// agent needs to fix and wants a resubmit, not a dead end. Render it as a
+		// normal tool result, not a tool error.
 		if resp.StatusCode == http.StatusConflict {
-			if msg, ok := headMovedGuidance(ebuf); ok {
+			if msg, ok := refusalGuidance(ebuf); ok {
 				return []byte(msg), nil
 			}
 		}
@@ -352,23 +353,63 @@ func (e *statusError) Error() string { return e.msg }
 // memory use or multi-megabyte error strings.
 const errBodyCap = 4096
 
-// headMovedGuidance detects the operator's 409 reason=="head-moved" contract
-// (see tatara-operator /tasks/{t}/outcome) and returns the agent-facing
-// guidance message, appending the live SHA so the agent knows what to
-// re-review. Returns ok=false for any other body shape, so every other 4xx
-// (including a generic 409) stays a tool error.
-func headMovedGuidance(body []byte) (string, bool) {
+// refusalGuidance renders the operator's STRUCTURED 409 as a normal tool
+// result. The operator's readiness.go:87-92 has claimed this repo does it
+// since pr-not-ready existed; it did not - every refusal but head-moved
+// reached the agent as an unparsed JSON blob inside a tool ERROR. This is the
+// reason-keyed renderer that fixes that.
+//
+// It decodes {reason, message, liveSHA, blocked[]} and returns rendered
+// guidance for:
+//   - "head-moved" (see tatara-operator /tasks/{t}/outcome): the message plus
+//     the live SHA the agent should re-review against.
+//   - "pr-not-ready" (see internal/restapi/readiness.go prNotReadyResponse):
+//     the message plus one line per blocked MR naming repo, number and
+//     blockers.
+//
+// Any other reason - including no reason at all - returns ok=false, so it
+// stays a hard tool error. This carve-out is a CLOSED list, not a catch-all:
+// an unrecognised reason is not something this cli knows how to turn into
+// actionable guidance yet.
+func refusalGuidance(body []byte) (string, bool) {
 	var r struct {
 		Reason  string `json:"reason"`
 		Message string `json:"message"`
 		LiveSHA string `json:"liveSHA"`
+		Blocked []struct {
+			Repo     string   `json:"repo"`
+			Number   int      `json:"number"`
+			HeadSHA  string   `json:"headSHA"`
+			Blockers []string `json:"blockers"`
+			Detail   string   `json:"detail"`
+		} `json:"blocked"`
 	}
-	if json.Unmarshal(body, &r) != nil || r.Reason != "head-moved" {
+	if json.Unmarshal(body, &r) != nil {
 		return "", false
 	}
-	msg := r.Message
-	if r.LiveSHA != "" {
-		msg += "\n\nliveSHA: " + r.LiveSHA
+	switch r.Reason {
+	case "head-moved":
+		msg := r.Message
+		if r.LiveSHA != "" {
+			msg += "\n\nliveSHA: " + r.LiveSHA
+		}
+		return msg, true
+	case "pr-not-ready":
+		msg := r.Message
+		for _, m := range r.Blocked {
+			// The head is part of the identity of what was judged, not decoration:
+			// the operator judges each MR at its LIVE head, and an agent with more
+			// than one push in flight cannot otherwise tell which one was read.
+			// Only the ci-red detail ever embedded a SHA; conflict and
+			// unresolved-review name none.
+			ref := fmt.Sprintf("%s!%d", m.Repo, m.Number)
+			if m.HeadSHA != "" {
+				ref += "@" + m.HeadSHA
+			}
+			msg += fmt.Sprintf("\n\n%s [%s]: %s", ref, strings.Join(m.Blockers, ","), m.Detail)
+		}
+		return msg, true
+	default:
+		return "", false
 	}
-	return msg, true
 }

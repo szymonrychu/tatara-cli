@@ -459,10 +459,31 @@ func TestInvoke_HeadMovedIsNotAToolError(t *testing.T) {
 	assert.Contains(t, string(body), "bbb", "guidance must carry the liveSHA")
 }
 
-// TestInvoke_GenericConflictStaysAToolError verifies a 409 without
-// reason=="head-moved" is unaffected by the head-moved carve-out and still
-// surfaces as a tool error.
-func TestInvoke_GenericConflictStaysAToolError(t *testing.T) {
+// TestInvoke_UnknownReasonConflictStaysAToolError verifies a 409 whose reason
+// is not one of the closed list of recognised refusals (currently head-moved
+// and pr-not-ready) is unaffected by the guidance carve-out and still surfaces
+// as a tool error. This is the closed-list pin: refusalGuidance is a lookup
+// table, not a catch-all, and an unrecognised reason must not silently start
+// swallowing tool errors.
+func TestInvoke_UnknownReasonConflictStaysAToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"some-other-reason","error":"some other conflict"}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.Error(t, err)
+	assert.Nil(t, body)
+	assert.Contains(t, err.Error(), "409")
+}
+
+// TestInvoke_GenericConflictWithNoReasonStaysAToolError verifies a 409 body
+// carrying no "reason" field at all (the shape any non-tatara backend, or an
+// older operator, might return) is still a hard tool error rather than being
+// treated as a recognised, guidance-worthy refusal.
+func TestInvoke_GenericConflictWithNoReasonStaysAToolError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"error":"some other conflict"}`))
@@ -474,6 +495,56 @@ func TestInvoke_GenericConflictStaysAToolError(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, body)
 	assert.Contains(t, err.Error(), "409")
+}
+
+// TestInvoke_PRNotReadyRendersAsGuidanceNotAToolError verifies the operator's
+// 409 reason=="pr-not-ready" body (internal/restapi/readiness.go:
+// prNotReadyResponse) is rendered as a normal (non-error) tool result carrying
+// the message plus one line per blocked MR naming repo, number and blockers -
+// the operator's readiness.go:87-92 comment has claimed since pr-not-ready
+// existed that tatara-cli does this; it did not, until this change.
+func TestInvoke_PRNotReadyRendersAsGuidanceNotAToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"pr-not-ready","error":"not ready","message":"This submission was NOT accepted: the merge request(s) it names are not ready to be handed on (ci-red, conflict). Fix every item below, push, and submit again.","blocked":[
+			{"repo":"tatara-cli","number":123,"headSHA":"aaa111","blockers":["ci-red"],"detail":"CI is RED at the pushed head aaa111"},
+			{"repo":"tatara-operator","number":456,"headSHA":"bbb222","blockers":["conflict"],"detail":"the branch CONFLICTS with its base"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err, "pr-not-ready 409 must not surface as a tool error")
+	assert.Contains(t, string(body), "not ready to be handed on")
+	assert.Contains(t, string(body), "tatara-cli!123", "guidance must name the blocked repo and number")
+	assert.Contains(t, string(body), "ci-red", "guidance must name the blocking axis")
+	assert.Contains(t, string(body), "tatara-operator!456")
+	assert.Contains(t, string(body), "conflict")
+}
+
+// TestInvoke_PRNotReadyGuidanceCoversEachBlockerReason exercises the three
+// pr-not-ready blocker axes (ci-red, conflict, unresolved-review) individually
+// - the operator's blocker vocabulary (readiness.go blockerCIRed,
+// blockerConflict, blockerUnresolvedReview) - and asserts every one renders as
+// guidance, not just the head-moved special case that existed before this
+// change.
+func TestInvoke_PRNotReadyGuidanceCoversEachBlockerReason(t *testing.T) {
+	for _, reason := range []string{"ci-red", "conflict", "unresolved-review"} {
+		reason := reason
+		t.Run(reason, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = fmt.Fprintf(w, `{"reason":"pr-not-ready","error":"not ready","message":"not ready","blocked":[{"repo":"r","number":1,"headSHA":"h","blockers":[%q],"detail":"d"}]}`, reason)
+			}))
+			defer srv.Close()
+			c := freshClient(t, srv.URL)
+			tool := toolByName(t, MemoryTools(), "memory_write")
+			body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+			require.NoError(t, err, "reason=%s must render as guidance, not a tool error", reason)
+			assert.Contains(t, string(body), reason)
+		})
+	}
 }
 
 // Finding #7: Body must be capped (not unlimited) on large error responses.
@@ -702,4 +773,24 @@ func TestReportInternalIssue_LogLevel(t *testing.T) {
 		require.Len(t, recs, 1)
 		require.Equal(t, slog.LevelError, recs[0].Level)
 	})
+}
+
+// TestInvoke_PRNotReadyGuidanceNamesTheJudgedHead pins the head SHA into the
+// rendered guidance. The operator judges each blocked MR at its LIVE head and
+// puts that head on the wire (readiness.go blockedMR.HeadSHA); without it in
+// the render, an agent with several pushes in flight cannot tell which head was
+// judged - only the ci-red detail happened to embed one.
+func TestInvoke_PRNotReadyGuidanceNamesTheJudgedHead(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"pr-not-ready","error":"not ready","message":"not ready","blocked":[
+			{"repo":"tatara-cli","number":123,"headSHA":"aaa111","blockers":["conflict"],"detail":"the branch CONFLICTS with its base"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "aaa111", "guidance must name the head the operator judged")
 }
