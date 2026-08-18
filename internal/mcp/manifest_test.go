@@ -21,9 +21,13 @@ func TestGenerateToolManifest(t *testing.T) {
 		t.Fatal("manifest missing submit_outcome")
 	}
 	for field, want := range map[string][]string{
-		"action":   {"submitted", "declined", "file_issue", "propose"},
-		"decision": {"implement", "close", "discuss"},
-		"verdict":  {"approve", "request_changes"},
+		// The three gate actions are load-bearing OUTSIDE this repo:
+		// tatara-agent-skills' validate_tool_calls.py fetches the published
+		// tool-manifest.json and hard-fails on an action literal absent here,
+		// so the skills MR documenting submit_outcome(action="approved")
+		// cannot go green until this ships in a release.
+		"action":  {"submitted", "declined", "approved", "discuss", "rejected", "file_issue", "propose", "skip", "exhausted"},
+		"verdict": {"approve", "request_changes"},
 	} {
 		got := map[string]bool{}
 		for _, v := range so.Enums[field] {
@@ -34,6 +38,15 @@ func TestGenerateToolManifest(t *testing.T) {
 				t.Errorf("submit_outcome.%s missing value %q, got %v", field, v, so.Enums[field])
 			}
 		}
+	}
+
+	// clarify's `decision` field is deleted with the profile. It must vanish
+	// from the manifest, not linger with a stale value set: validate_tool_calls.py
+	// skips fields the manifest does not track, so an absent `decision` makes
+	// the skills repo's residual submit_outcome(decision=...) prose inert
+	// rather than an error, which is what lets MR4 release before MR3 lands.
+	if _, ok := so.Enums["decision"]; ok {
+		t.Errorf("submit_outcome.decision must be gone with the clarify profile, got %v", so.Enums["decision"])
 	}
 
 	mw, ok := byName["mr_write"]

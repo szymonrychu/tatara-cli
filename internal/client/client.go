@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // RefreshFunc is called when the current token is about to expire.
@@ -198,13 +197,11 @@ func (c *Client) ensureFreshLocked(ctx context.Context) error {
 	}
 	nt, err := c.refresh(ctx, c.token)
 	if err != nil {
-		obs.TokenRefreshTotal.WithLabelValues("error").Inc()
 		if c.log != nil {
 			c.log.Error("token refresh failed", "err", err)
 		}
 		return fmt.Errorf("client: refresh: %w", err)
 	}
-	obs.TokenRefreshTotal.WithLabelValues("ok").Inc()
 	if c.log != nil {
 		c.log.Info("token refreshed", "expires_at", nt.ExpiresAt)
 	}

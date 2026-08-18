@@ -1,11 +1,18 @@
 {"type":"object","properties":{
   "task":{"type":"string"},
-  "action":{"type":"string","enum":["submitted","declined"]},
+  "action":{"type":"string","enum":["submitted","declined","approved","discuss","rejected"]},
   "title":{"type":"string","description":"MR title. Required when action=submitted."},
   "body":{"type":"string","description":"MR body. Required when action=submitted."},
   "change_significance":{"type":"string","enum":["major","minor","patch"],
     "description":"Required when action=submitted. major=backward-incompatible; minor=backward-compatible feature; patch=fix. YOU own this level - a reviewer may raise it but can never lower it."},
   "merge_order":{"type":"array","items":{"type":"string"},
     "description":"REQUIRED when this task's MRs span more than one repo: the Repository CR names in dependency order, first-merged first. There is NO default. Get it wrong and a downstream repo ships against an API that has not merged yet."},
-  "decline_reason":{"type":"string","description":"Required when action=declined."}},
+  "decline_reason":{"type":"string","description":"Required when action=declined."},
+  "reason":{"type":"string","description":"ALWAYS required for action=approved, action=discuss and action=rejected. For approved, say in plain words WHAT you are treating as the go-ahead: name the maintainer and why you read their comment as approval, or - when tatara proposed this issue itself and no human has commented - say exactly that."},
+  "approving_maintainer":{"type":"string","description":"Required for action=approved WHENEVER you are citing a human comment as the go-ahead: the login of the maintainer whose comment you are citing. Send it together with approval_citations - both, or neither, never one alone. OMIT BOTH only when tatara proposed this issue itself and no human has commented on it: the operator then grants on provenance alone and there is no comment author to name. It is a DECLARATION, not an authority - the operator refuses if it is not a verified maintainer, and refuses again if it does not match the author of the comment you cited. The citation stays the sole authority."},
+  "plan_note_id":{"type":"string","description":"ALWAYS required for action=approved, including when no human commented: the id returned by the task_note(kind=\"plan\") call that wrote the plan being approved. The operator hashes that note's body at grant and re-checks the hash before you write code, so a plan swapped after approval is refused."},
+  "approval_citations":{"type":"array","items":{"type":"object","properties":{
+      "id":{"type":"string"},"quote":{"type":"string"}},
+    "required":["id","quote"]},
+    "description":"Required for action=approved whenever a maintainer has commented, and always sent together with approving_maintainer - both, or neither: ONE entry per issue this task owns. id is the external_id of the maintainer comment you are citing, copied verbatim from the <comment external_id=\"...\"> attribute already in your turn-0 bundle - do NOT re-crawl to find it; it does NOT have to be the newest comment on the thread. quote is a VERBATIM substring of that same comment's body. YOU judge whether the comment approves; the operator re-reads the comment itself and refuses if the id does not name a maintainer-authored non-bot comment on that issue, if your quote is not in it, or if it already approved once. If a LATER maintainer comment withdraws the approval you would otherwise cite, send action=discuss instead - do not cite a withdrawn approval. Omit this field, and approving_maintainer with it, ONLY when no human has commented at all."}},
  "required":["action"],"additionalProperties":false}

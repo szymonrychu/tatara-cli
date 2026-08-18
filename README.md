@@ -1,10 +1,10 @@
 # tatara-cli
 
-> Part of the tatara platform - see ARCHITECTURE.md in the tatara repo.
+> Part of the tatara platform - see `CLAUDE.md` for the repo map.
 
 tatara platform CLI: OIDC device flow, REST passthrough, stdio MCP server.
 
-Architecture: [github.com/szymonrychu/tatara/blob/main/ARCHITECTURE.md](https://github.com/szymonrychu/tatara/blob/main/ARCHITECTURE.md)
+Architecture: [tatara-documentation](https://szymonrychu.github.io/tatara-documentation/)
 
 ## Install
 
@@ -65,15 +65,22 @@ One row per agent kind (`Task.status.agentKind`), resolved by
 `TATARA_TOOL_PROFILE`. An unknown or empty profile fails **closed** to the
 always-on six, with no `submit_outcome` - that pod cannot terminate its Task.
 
-| Profile | task_list | scm_read | issue_write | mr_write | code_* (4) | memory_query/describe | memory_write | memory_entity | memory_edges | submit_outcome | **Total** |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| brainstorm | x | x | | | x (4) | x | x | x | | x | **17** |
-| incident | x | x | | | x (4) | x | x | x | x | x | **18** |
-| clarify | | x | x | | x (3: no code_graph) | x | | | | x | **14** |
-| implement | | x | | x | x (4) | x | x | | | x | **16** |
-| review | | x | | x | x (4) | x | | | | x | **15** |
-| refine | x | x | x | x | | x | | | | x | **13** |
-| documentation | | x | | x | x (4) | x | x | x | x | x | **18** |
+| Profile | task_list | scm_read | issue_write | mr_write | mr_takeover_request | code_* (4) | memory_query/describe | memory_write | memory_entity | memory_edges | submit_outcome | **Total** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| brainstorm | x | x | | | | x (4) | x | x | x | | x | **17** |
+| incident | x | x | | | | x (4) | x | x | x | x | x | **18** |
+| implement | | x | x | x | x | x (4) | x | x | | | x | **18** |
+| review | | x | | x | x | x (4) | x | | | | x | **16** |
+| refine | x | x | x | x | | | x | | | | x | **13** |
+| documentation | | x | | x | | x (4) | x | x | x | x | x | **18** |
+| upgrade | | x | | x | | x (4) | x | x | | | x | **16** |
+
+`clarify` was a seventh profile until contract 4, when it was folded into
+`implement` and deleted. `upgrade` is the seventh profile as of 2026-08-13:
+this table is once again seven rows for seven agent kinds, not six.
+`clarify`'s three decisions became `approved`/`discuss`/`rejected` actions
+on the implement `submit_outcome`, and its `issue_write` plus memory-recall
+grants folded into the implement profile.
 
 Every profile also gets the always-on six on top of the columns above.
 `mr_write` under `refine` is restricted to `action=comment` in code

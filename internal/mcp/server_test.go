@@ -16,14 +16,11 @@ import (
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // profileToolCounts is contract D.6's gating TABLE, counted (the always-on six,
@@ -31,15 +28,19 @@ import (
 // line under the table says 17/20/14/17/16/13/19; it is arithmetically wrong and
 // contradicts the table it summarises (incident is denied issue_write and
 // mr_write, so it cannot be 20 out of a 20-tool surface). The table is
-// normative; these are its counts.
+// normative; these are its counts. The clarify row is deleted at contract 4;
+// implement is 18, not the summary's 17, because clarify's issue_write folded
+// into it. upgrade (16) is new at 2026-08-13, not part of the original D.6
+// table: implement's code/memory grants plus mr_write, minus issue_write and
+// task_list.
 var profileToolCounts = map[string]int{
 	"brainstorm":    17,
 	"incident":      18,
-	"clarify":       14,
-	"implement":     17,
+	"implement":     18,
 	"review":        16,
 	"refine":        13,
 	"documentation": 18,
+	"upgrade":       16,
 }
 
 // readLines reads a golden file into a sorted slice, skipping blanks/comments.
@@ -133,7 +134,7 @@ func TestNewServer_ToolsListIsNoLongerIdenticalAcrossProfiles(t *testing.T) {
 	// not allowed to call.
 	mem := freshClient(t, "http://memory.invalid")
 	op := freshClient(t, "http://operator.invalid")
-	a := NewServer(mem, op, discardLogger(), "clarify").RegisteredNames()
+	a := NewServer(mem, op, discardLogger(), "refine").RegisteredNames()
 	b := NewServer(mem, op, discardLogger(), "implement").RegisteredNames()
 	require.NotEqual(t, a, b)
 }
@@ -208,12 +209,12 @@ func TestRegister_LogsInfoOnSuccess(t *testing.T) {
 func TestNewServer_LogsResolvedSurface(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), logger, "clarify")
+	NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, "http://operator.invalid"), logger, "implement")
 
 	logged := buf.String()
 	assert.Contains(t, logged, "tools_registered", "startup must log the resolved surface")
-	assert.Contains(t, logged, "clarify")
-	assert.Contains(t, logged, `"count":14`)
+	assert.Contains(t, logged, "implement")
+	assert.Contains(t, logged, `"count":18`)
 }
 
 // TestRegister_LogsErrorOnFailure verifies that a backend error produces an
@@ -308,12 +309,58 @@ func TestRegister_LogsResourceID(t *testing.T) {
 	assert.Contains(t, logged, "mem-42", "resource_id must equal the id arg")
 }
 
-// TestRegister_MetricsIncremented verifies that a successful tool call
-// increments ToolCallsTotal{tool, "ok"} (hard rule 13).
-func TestRegister_MetricsIncremented(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+const testAuthNote = "auth: MCP server started UNAUTHENTICATED (stage=token_status)"
+
+// The tool result text is the only channel out of this process that provably
+// reaches Loki (the wrapper tails the transcript). A pod that started without
+// credentials must say so where an operator can read it - on the error results
+// that are already anomalous, and nowhere else.
+func TestRegister_AuthNoteRidesErrorResults(t *testing.T) {
+	// 400 is a client error: it does not latch the memory degraded state, so it
+	// stays an ordinary error tool result.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
+	}))
+	defer backend.Close()
+
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm",
+		WithAuthNote(testAuthNote))
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.True(t, res.IsError, "a 400 from the backend must surface as an error tool result")
+	assert.Contains(t, resultText(t, res), testAuthNote, "the auth note must ride the error result")
+}
+
+// Healthy turns pay no context tax: a successful result is byte-identical to
+// what an authenticated server returns.
+func TestRegister_AuthNoteAbsentFromSuccessfulResults(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm",
+		WithAuthNote(testAuthNote))
+
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.False(t, res.IsError)
+	assert.NotContains(t, resultText(t, res), testAuthNote, "a successful result must not carry the auth note")
+}
+
+// With credentials resolved there is no note at all, so an error result is
+// exactly the backend's message.
+func TestRegister_NoAuthNoteLeavesErrorResultUnchanged(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
 	}))
 	defer backend.Close()
 
@@ -322,10 +369,9 @@ func TestRegister_MetricsIncremented(t *testing.T) {
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
 
-	before := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
-	_ = callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
-	after := testutil.ToFloat64(obs.ToolCallsTotal.With(prometheus.Labels{"tool": "memory_write", "result": "ok"}))
-	assert.Equal(t, before+1, after, "ToolCallsTotal must increment on success")
+	res := callTool(ctx, t, cli, "memory_write", map[string]any{"text": "hello"})
+	require.True(t, res.IsError)
+	assert.NotContains(t, resultText(t, res), "UNAUTHENTICATED")
 }
 
 // startClient wires an in-process MCP client against srv and completes the
@@ -371,8 +417,8 @@ func TestCallTool_NonRegisteredToolIsNotCallable(t *testing.T) {
 	}))
 	defer op.Close()
 
-	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "clarify")
-	require.False(t, srv.allow["mr_write"], "clarify must not hold mr_write")
+	srv := NewServer(freshClient(t, "http://memory.invalid"), freshClient(t, op.URL), discardLogger(), "brainstorm")
+	require.False(t, srv.allow["mr_write"], "brainstorm must not hold mr_write")
 	require.NotContains(t, srv.RegisteredNames(), "mr_write")
 
 	ctx := context.Background()

@@ -2,6 +2,7 @@ code_context
 code_explain
 code_graph
 code_search
+issue_write
 memory_describe
 memory_query
 memory_write

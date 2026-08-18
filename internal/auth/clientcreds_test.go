@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/auth"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 func newFakeIssuer(t *testing.T) *httptest.Server {
@@ -128,27 +127,124 @@ func TestClientCredentialsTokenEmptyAccessToken(t *testing.T) {
 	require.Contains(t, err.Error(), "empty access_token")
 }
 
-// TestClientCredsMintTotal_IncrementedOnSuccess verifies that a successful cc mint
-// increments obs.ClientCredsMintTotal{result="ok"} (hard rule 13).
-func TestClientCredsMintTotal_IncrementedOnSuccess(t *testing.T) {
+// stagedIssuer stands up a fake issuer whose discovery and token responses are
+// both caller-controlled, so every failure branch of the mint is reachable.
+func stagedIssuer(t *testing.T, disco, token http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", disco)
+	mux.HandleFunc("/token", token)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A mint failure is the ONE auth signal an agent pod has no other producer for,
+// and there is no metrics egress from a stdio subprocess - so the stage has to
+// ride the error itself. Nine branches collapsed onto one "error" cannot say
+// which call failed; MintError.Stage can.
+func TestClientCredentialsToken_StageOnEveryFailureBranch(t *testing.T) {
+	okDisco := func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"token_endpoint":"http://%s/token"}`, r.Host)
+	}
+	notCalled := func(http.ResponseWriter, *http.Request) {
+		t.Error("token endpoint must not be reached for this case")
+	}
+
+	cases := []struct {
+		name  string
+		stage string
+		// issuer overrides the fake issuer URL entirely when non-empty.
+		issuer string
+		disco  http.HandlerFunc
+		token  http.HandlerFunc
+	}{
+		{
+			name: "discovery request build", stage: "discovery_request",
+			// DEL is an invalid control character in a URL, so
+			// http.NewRequestWithContext fails before any I/O.
+			issuer: "http://\x7fbad.invalid",
+		},
+		{
+			name: "discovery round-trip", stage: "discovery_call",
+			issuer: "http://127.0.0.1:1",
+		},
+		{
+			name: "discovery status", stage: "discovery_status",
+			disco: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) },
+			token: notCalled,
+		},
+		{
+			name: "discovery decode", stage: "discovery_decode",
+			disco: func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, `{}`) },
+			token: notCalled,
+		},
+		{
+			name: "token request build", stage: "token_request",
+			disco: func(w http.ResponseWriter, _ *http.Request) {
+				// The JSON \u007f escape decodes to DEL, an invalid URL control
+				// character: the token request fails to build, before any I/O.
+				_, _ = fmt.Fprint(w, "{\"token_endpoint\":\"http://\\u007fbad.invalid/token\"}")
+			},
+			token: notCalled,
+		},
+		{
+			name: "token round-trip", stage: "token_call",
+			disco: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, `{"token_endpoint":"http://127.0.0.1:1/token"}`)
+			},
+			token: notCalled,
+		},
+		{
+			name: "token status", stage: "token_status",
+			disco: okDisco,
+			token: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) },
+		},
+		{
+			name: "token decode", stage: "token_decode",
+			disco: okDisco,
+			token: func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, `not json`) },
+		},
+		{
+			name: "token empty", stage: "token_empty",
+			disco: okDisco,
+			token: func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, `{"expires_in":300}`) },
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			issuer := c.issuer
+			if issuer == "" {
+				issuer = stagedIssuer(t, c.disco, c.token).URL
+			}
+			_, _, err := auth.ClientCredentialsToken(context.Background(), issuer, "cid", "secret")
+			require.Error(t, err)
+			assert.Equal(t, c.stage, auth.MintStage(err), "MintStage must name the failing branch")
+			assert.Contains(t, err.Error(), "stage="+c.stage,
+				"the stage must survive into the error text, which is what reaches the transcript")
+		})
+	}
+}
+
+// A successful mint carries no stage: MintStage on a non-mint error is empty.
+func TestMintStage_EmptyForSuccessAndForeignErrors(t *testing.T) {
 	srv := newFakeIssuer(t)
 	defer srv.Close()
 
-	before := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("ok"))
 	_, _, err := auth.ClientCredentialsToken(context.Background(), srv.URL, "cid", "secret")
 	require.NoError(t, err)
-	after := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("ok"))
-	assert.Equal(t, before+1, after, "ClientCredsMintTotal{ok} must increment on success")
+	assert.Empty(t, auth.MintStage(nil))
+	assert.Empty(t, auth.MintStage(auth.ErrNoToken))
 }
 
-// TestClientCredsMintTotal_IncrementedOnError verifies that a failed cc mint
-// increments obs.ClientCredsMintTotal{result="error"} (hard rule 13).
-func TestClientCredsMintTotal_IncrementedOnError(t *testing.T) {
-	before := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("error"))
-	_, _, err := auth.ClientCredentialsToken(context.Background(), "http://127.0.0.1:1", "cid", "secret")
-	require.Error(t, err)
-	after := testutil.ToFloat64(obs.ClientCredsMintTotal.WithLabelValues("error"))
-	assert.Equal(t, before+1, after, "ClientCredsMintTotal{error} must increment on error")
+// The mint error must stay unwrappable so callers can still match on the
+// underlying transport/decoding error.
+func TestMintError_Unwraps(t *testing.T) {
+	inner := errors.New("boom")
+	err := error(&auth.MintError{Stage: "token_call", Err: inner})
+	assert.ErrorIs(t, err, inner)
+	assert.Equal(t, "token_call", auth.MintStage(err))
 }
 
 // Finding 2 (audit-r3): An expired stored token must fall through to client_credentials,

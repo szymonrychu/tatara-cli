@@ -5,10 +5,14 @@
 # fails closed to six tools with no submit_outcome, and the Task can never
 # terminate. That is not hypothetical: it is exactly what happened to every
 # clarify pod before 2026-07-12 (contract L.5).
+# clarify was DELETED as an agent kind at contract 4 (#521): its three
+# decisions became approved/discuss/rejected actions on the implement outcome.
+# upgrade was ADDED as the 7th agent kind (2026-08-13): a scheduled agent that
+# opens MRs the same way implement does, with no approval gate.
 brainstorm
-clarify
 documentation
 implement
 incident
 refine
 review
+upgrade

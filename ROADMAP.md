@@ -1,7 +1,7 @@
 # ROADMAP.md
 
-Component-local roadmap for tatara-cli. Phase-level platform roadmap
-lives in `~/Documents/tatara/ROADMAP.md`.
+Component-local roadmap for tatara-cli. Each repo carries its own
+`ROADMAP.md`; there is no parent repo.
 
 Statuses: `planned`, `in progress`, `shipped`.
 
@@ -72,6 +72,41 @@ client, `TargetChat`, `--chat-base-url`, `TATARA_CHAT_URL`) is fully
 decommissioned - `task_note` is now the platform's only agent-to-agent
 channel. `tatara mcp` refuses to start on a `TATARA_CONTRACT_VERSION`
 mismatch. See `~/Documents/tatara-new/docs/superpowers/plans/2026-07-12-task-centric-cli.md`.
+
+## v2.0.0 - contract 4: the clarify fold and the implement approval gate
+
+**Status:** code-complete 2026-08-07 (tatara #521, MR4 of seven).
+
+`clarify` is deleted as an agent kind and a tool profile: 7 kinds -> 6.
+Its `implement`/`close`/`discuss` decisions became `approved`/`rejected`/
+`discuss` actions on the implement `submit_outcome`, alongside the new
+`approvingMaintainer` and `planNoteId` gate fields (`approvalCitations`
+moved across unchanged). `documentation` stopped aliasing
+`implementOutcomeSchema` and got its own, so it cannot emit the gate
+actions. The implement profile absorbed clarify's `issue_write` and
+memory-recall grants (17 -> 18 tools). `ContractVersion` 3 -> 4, which an
+operator or wrapper on 3 must refuse at pod-ready.
+
+Backward-incompatible by definition, and it gates the skills MR: the
+released `tool-manifest.json` is what `tatara-agent-skills`'
+`validate_tool_calls.py` validates against, so this must RELEASE before
+that repo can document the new actions. See
+`~/Documents/tatara-new/code/tatara-operator/docs/superpowers/plans/2026-08-07-521-lifecycle-and-agent-merge.md`.
+
+## v2.1.0 - the upgrade agent kind
+
+**Status:** code-complete 2026-08-13.
+
+`upgrade` is added as the 7th agent kind: 6 kinds -> 7. It opens MRs across
+several repos for one dependency-upgrade unit, reusing implement's code and
+memory grants plus `mr_write`, but without `issue_write` (it drives no
+approval gate - nobody filed an issue for a scheduled upgrade) or `task_list`
+(contract D.6 denies it to every MR-opening kind; sibling-unit dedup goes
+through the always-on `task_context(index=true)`). Its `submit_outcome`
+schema reuses `documentationOutcomeSchema` (gate-less, submitted|declined
+only) rather than duplicating it. This repo ships the kind BEFORE
+tatara-operator (see MEMORY.md) so operator-ahead-of-cli never repeats the
+contract L.5 P0 that "clarify" caused for the same reason.
 
 ## v0.1.1 - follow-ups
 

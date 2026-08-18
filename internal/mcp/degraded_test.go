@@ -1,21 +1,20 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/szymonrychu/tatara-cli/internal/client"
-	"github.com/szymonrychu/tatara-cli/internal/obs"
 )
 
 // resultText extracts the text content of a tool result.
@@ -207,17 +206,22 @@ func TestNewServer_DegradedKeepsTheToolSurface(t *testing.T) {
 	require.Contains(t, srv.RegisteredNames(), "memory_query")
 }
 
-// Hard rule 13: a degraded answer is a distinct, countable outcome.
-func TestCallTool_DegradedIncrementsMetric(t *testing.T) {
+// A degraded answer is a distinct outcome and the transcript is where it has to
+// show up: there is no metrics egress from this process.
+func TestCallTool_DegradedIsLoggedAsSuchAndTellsTheAgent(t *testing.T) {
 	t.Setenv(memoryDegradedEnv, "true")
-	srv := NewServer(nil, freshClient(t, "http://operator.invalid"), discardLogger(), "brainstorm")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	srv := NewServer(nil, freshClient(t, "http://operator.invalid"), logger, "brainstorm")
 	ctx := context.Background()
 	cli := startClient(ctx, t, srv)
 
-	labels := prometheus.Labels{"tool": "memory_describe", "result": "degraded"}
-	before := testutil.ToFloat64(obs.ToolCallsTotal.With(labels))
-	_ = callTool(ctx, t, cli, "memory_describe", map[string]any{"mode": "hybrid", "text": "x"})
-	require.Equal(t, before+1, testutil.ToFloat64(obs.ToolCallsTotal.With(labels)))
+	res := callTool(ctx, t, cli, "memory_describe", map[string]any{"mode": "hybrid", "text": "x"})
+	require.False(t, res.IsError, "the degraded path answers with guidance, not an error")
+	require.Contains(t, resultText(t, res), "MEMORY_DEGRADED",
+		"the agent-visible result is the only thing that reaches Loki")
+	require.Contains(t, buf.String(), "memory tool answered from the degraded path")
+	require.Contains(t, buf.String(), "memory_describe")
 }
 
 func TestMemoryBackendDown_ClassifiesFailures(t *testing.T) {
