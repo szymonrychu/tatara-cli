@@ -8,8 +8,8 @@
 # kaniko-build.sh.
 #
 # Second arg selects exactly ONE tag to push: `shortsha` (:SHORT_SHA, called
-# from ci.yml's image job) or `version` (:VERSION via git describe, called
-# from release.yml's release job after the semver tag has been cut). Both
+# from ci.yml's image job) or `version` (:VERSION, which release.yml's release
+# job passes in from its cut-tag step, NOT from git describe - see below). Both
 # workflows run on every push to main and used to push :SHORT_SHA in the same
 # buildctl call, so it landed in Harbor twice and the second push 412'd on
 # tag immutability. No default: an unset/unknown mode fails loudly instead of
@@ -20,7 +20,20 @@ REPO="${1:?repo name required}"
 TAG_MODE="${2:?tag mode required: shortsha|version}"
 BUILDKITD_ADDR="tcp://buildkitd.arc-runners:1234"
 SHORT_SHA="${GITHUB_SHA:0:7}"
-VERSION="$(git describe --tags --always --dirty)"
+# In `version` mode, release.yml's release job passes the already-cut tag in
+# as VERSION; git describe must not be trusted to pick it, because a re-run
+# of a release that failed after cutting its tag leaves two semver tags on
+# one commit and describe resolves to the LOWER one, publishing the image
+# under the previous version (the wrapper's 2026-07-30 v1.3.4/v1.3.5 wedge).
+# So `version` mode REQUIRES VERSION and fails loudly without it - falling
+# back to describe there is the bug, not a safety net. `shortsha` mode never
+# sets VERSION and legitimately falls through to describe.
+if [ "$TAG_MODE" = version ]; then
+  # No apostrophe in this message: bash quote-processes the ${var:?word} word,
+  # so a stray single quote is a parse error, not text.
+  : "${VERSION:?version mode requires VERSION from the cut-tag step in release.yml}"
+fi
+VERSION="${VERSION:-$(git describe --tags --always --dirty)}"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DEST="harbor.szymonrichert.pl/containers/${REPO}"
 
