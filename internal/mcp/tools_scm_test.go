@@ -88,8 +88,12 @@ func TestSCMRead_NumberRequiredForCIAndComments(t *testing.T) {
 // argString does NOT handle - a bespoke coercion path is how since_days came
 // to be droppable.
 //
-// The table is hand-written, so its COMPLETENESS is pinned separately, against
-// the schema literal itself: see TestSCMRead_ArgTableCoversEveryOptionalSchemaProperty.
+// The table is hand-written, so its COMPLETENESS is pinned by TWO guards, and
+// both are needed: TestSCMRead_ArgTableCoversEveryOptionalSchemaProperty derives
+// the arg SET from the schema literal, and TestSCMRead_AdvertisedArgCountIsPinned
+// pins the ROW count. The derivation alone does not bite on a deleted row - drop
+// the mr/since row and `since` is still covered by the issues row, which is
+// #636's own drift surviving the guard built for it.
 func scmAdvertisedArgs() []struct {
 	kind, arg string
 	value     any
@@ -165,6 +169,24 @@ func TestSCMRead_ArgTableCoversEveryOptionalSchemaProperty(t *testing.T) {
 		require.Contains(t, schema.Properties, arg,
 			"scmAdvertisedArgs pins %q, which the scm_read schema no longer advertises", arg)
 	}
+}
+
+// The derivation above guards the arg SET, not the table: a deleted row whose
+// arg another kind still pins is invisible to it. Kind applicability lives only
+// in description prose ("kind=issues|mr only."), so (kind, arg) is not derivable
+// from the schema - the row count is, and it is the same guard the operator's
+// mirror of this table uses (TestScmRead_AdvertisedParamCountIsPinned).
+func TestSCMRead_AdvertisedArgCountIsPinned(t *testing.T) {
+	seen := map[string]bool{}
+	for _, tc := range scmAdvertisedArgs() {
+		key := tc.kind + "/" + tc.arg
+		require.False(t, seen[key], "scmAdvertisedArgs has duplicate %s", key)
+		seen[key] = true
+	}
+	require.Len(t, scmAdvertisedArgs(), 10,
+		"scmAdvertisedArgs has %d entries, want 10; if scm_read gained or lost a "+
+			"per-kind optional, update this count with the list",
+		len(scmAdvertisedArgs()))
 }
 
 // The schema description is the only place an agent learns that limit takes the
