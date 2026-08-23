@@ -15,9 +15,10 @@ import (
 
 // injectedByTheAgentRuntime is every environment variable the tatara agent
 // runtime puts into an agent pod: tatara-operator's internal/agent/pod.go, plus
-// TATARA_TURN_ID from tatara-claude-code-wrapper's cmd/wrapper/app.go. The
-// wrapper hands os.Environ() to the agent process wholesale, so `go test ./...`
-// inside a pod runs with every one of these set while CI runs clean.
+// TATARA_TURN_ID, which tatara-claude-code-wrapper names but hands only to its
+// lifecycle-hook subprocess. The wrapper hands os.Environ() to the agent process
+// wholesale, so `go test ./...` inside a pod runs with these set while CI runs
+// clean.
 //
 // It is data, not a contract: nothing imports it and nothing in the operator
 // has to know it exists. Adding a name that the operator dropped costs a stale
@@ -78,14 +79,73 @@ var injectedByTheAgentRuntime = []string{
 	"TATARA_WORKSPACE_FULL_CLONE",
 }
 
-// scannedDirs are the package directories whose env reads decide whether THIS
-// package's tests are hermetic. internal/client is in the list because this
-// package's production code imports it and its correlationID() reads
-// TATARA_TURN_ID and RUN_ID on every client construction - a read that is
-// invisible from internal/mcp alone. Without it the guard would stay green
-// while a new read one package over quietly re-broke the suite, which is the
-// exact shape of the bug it exists to prevent.
-var scannedDirs = []string{".", "../client"}
+// productionFiles lists the non-test .go files in dir. Test files are excluded
+// on purpose: a _test.go naming an injected variable is a test driving the gate
+// deliberately (degraded_test.go does exactly that, ten times), not a read that
+// makes the suite non-hermetic.
+func productionFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err, "reading %s", dir)
+
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, name))
+	}
+	return out
+}
+
+// modulePath is the import prefix that marks a dependency as module-local, and
+// moduleRoot is where this package's directory sits relative to the module root,
+// so an import path maps back to a directory on disk.
+const (
+	modulePath = "github.com/szymonrychu/tatara-cli/"
+	moduleRoot = "../.."
+)
+
+// scannedDirs walks the module-local import closure of this package and returns
+// every directory in it, starting at ".".
+//
+// A hand-written list was the first shape of this: {".", "../client"}, because
+// internal/client.correlationID() reads RUN_ID on every client construction and
+// that read is invisible from internal/mcp alone. But internal/client itself
+// imports internal/auth, which reads OIDC_ISSUER / CLI_OIDC_CLIENT_ID /
+// CLI_OIDC_CLIENT_SECRET - so a list that stopped at hop 2 of a 3-package
+// closure left the guard's own invariant false on the commit that added it.
+// Stopping at any fixed hop is arbitrary; the closure is not.
+func scannedDirs(t *testing.T) []string {
+	t.Helper()
+	seen := map[string]bool{".": true}
+	var out []string
+	queue := []string{"."}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		out = append(out, dir)
+
+		for _, path := range productionFiles(t, dir) {
+			f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+			require.NoError(t, err, "parsing imports of %s", path)
+
+			for _, imp := range f.Imports {
+				imported, err := strconv.Unquote(imp.Path.Value)
+				if err != nil || !strings.HasPrefix(imported, modulePath) {
+					continue
+				}
+				next := filepath.Join(moduleRoot, strings.TrimPrefix(imported, modulePath))
+				if !seen[next] {
+					seen[next] = true
+					queue = append(queue, next)
+				}
+			}
+		}
+	}
+	return out
+}
 
 // TestPackageEnvReadsAreNeutralised is the guard the previous two rounds of
 // this bug did not have. Making the suite hermetic once fixes today; it does
@@ -94,8 +154,9 @@ var scannedDirs = []string{".", "../client"}
 // TATARA_MEMORY_DEGRADED arriving in this package (2026-07-26).
 //
 // So it asserts the invariant rather than the symptom: every agent-runtime
-// variable named by this package's PRODUCTION code must be in TestMain's unset
-// list. It scans the AST for string literals equal to an injected name, which
+// variable named by the PRODUCTION code this package's tests can reach - its own
+// and every module-local package it imports, transitively - must be in TestMain's
+// unset list. It scans the AST for string literals equal to an injected name, which
 // catches argOrEnv(a, "task", "TATARA_TASK") and any other indirection, not
 // just a literal os.Getenv call. Equality is exact, so prose that merely
 // mentions a variable - an error message, a doc comment's identifier, a log
@@ -110,19 +171,16 @@ func TestPackageEnvReadsAreNeutralised(t *testing.T) {
 		neutralised[k] = true
 	}
 
+	dirs := scannedDirs(t)
+	require.Subset(t, dirs, []string{".", moduleRoot + "/internal/client", moduleRoot + "/internal/auth"},
+		"the closure walk must resolve module-local imports; these three are its floor, not its ceiling")
+
 	fset := token.NewFileSet()
 	var scanned int
-	for _, dir := range scannedDirs {
-		entries, err := os.ReadDir(dir)
-		require.NoError(t, err, "reading %s", dir)
-
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
-			require.NoError(t, err, "parsing %s", name)
+	for _, dir := range dirs {
+		for _, path := range productionFiles(t, dir) {
+			f, err := parser.ParseFile(fset, path, nil, 0)
+			require.NoError(t, err, "parsing %s", path)
 			scanned++
 
 			ast.Inspect(f, func(n ast.Node) bool {

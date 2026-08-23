@@ -5,27 +5,44 @@ import (
 	"testing"
 )
 
-// injectedEnvNeutralised is the set of agent-runtime-injected variables this
-// package's production code reads. TestMain clears every one of them so the
-// suite is hermetic: `go test ./...` inside an agent pod must produce the same
-// result as CI, which runs on a clean environment.
+// injectedEnvNeutralised is the set of agent-runtime-injected variables the
+// production code this suite reaches can read. TestMain clears every one of them
+// so the suite is hermetic: `go test ./...` inside an agent pod must produce the
+// same result as CI, which runs on a clean environment.
 //
-// The list is derived from what THIS package reads, not copied from
-// internal/cmd/main_test.go - that one also clears XDG_CONFIG_HOME /
-// XDG_STATE_HOME, which move auth.DefaultTokenPath() and have no reader here.
+// The list is derived from what this package's import closure reads, not copied
+// from internal/cmd/main_test.go - that one also clears XDG_CONFIG_HOME /
+// XDG_STATE_HOME, which move auth.DefaultTokenPath() and which the agent runtime
+// does not inject anyway.
 //
-// TATARA_TURN_ID and RUN_ID are read one package over, in
-// internal/client.correlationID(), which every freshClient() in this suite
-// constructs. They are covered by the guard only because scannedDirs in
-// hermetic_test.go carries "../client" for them; drop that entry and these two
-// stop being enforced.
+// The last five are read in a package this one imports rather than here, so the
+// guard in hermetic_test.go only sees them because it walks the whole
+// module-local import closure:
+//
+//	RUN_ID, TATARA_TURN_ID  internal/client.correlationID(), on every
+//	                        freshClient() this suite constructs. RUN_ID is the
+//	                        entry doing the work in a pod: the wrapper builds the
+//	                        agent's environment from a bare os.Environ() and
+//	                        passes TATARA_TURN_ID only as extraEnv to the
+//	                        lifecycle-hook subprocess, so correlationID() always
+//	                        falls through to RUN_ID here. TATARA_TURN_ID is kept
+//	                        defensively - it costs one unset and covers the
+//	                        wrapper deciding to export it.
+//	OIDC_ISSUER,            internal/auth.ClientCredsConfigured(), reached from
+//	CLI_OIDC_CLIENT_ID,     internal/client. All three ARE set in an agent pod;
+//	CLI_OIDC_CLIENT_SECRET  left alone, a test that grows a real token path would
+//	                        mint client_credentials tokens against the live
+//	                        issuer in a pod and not in CI.
 var injectedEnvNeutralised = []string{
 	"TATARA_MEMORY_DEGRADED",
 	"TATARA_MEMORY_DISABLED",
 	"TATARA_PROJECT",
 	"TATARA_TASK",
-	"TATARA_TURN_ID",
 	"RUN_ID",
+	"TATARA_TURN_ID",
+	"OIDC_ISSUER",
+	"CLI_OIDC_CLIENT_ID",
+	"CLI_OIDC_CLIENT_SECRET",
 }
 
 // TestMain neutralises the ambient agent-pod environment for the whole package.

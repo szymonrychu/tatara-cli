@@ -64,6 +64,13 @@ func TestCallTool_DegradedEnvReturnsGuidanceWithoutCallingBackend(t *testing.T) 
 	text := resultText(t, res)
 	require.Contains(t, text, "MEMORY_DEGRADED")
 	require.Contains(t, text, "Proceed WITHOUT recall")
+	// This is the only positive assertion on the DEGRADED arm's reason text, and
+	// it is load-bearing for a test in the other direction: the disabled case
+	// asserts NotContains("flagged it unhealthy") to prove it did not fall
+	// through to this arm. Reword the reason with nothing pinning it and that
+	// assertion starts passing unconditionally - including with the switch order
+	// in newMemoryState reverted, which is the exact bug review caught once here.
+	require.Contains(t, text, "flagged it unhealthy")
 	require.NotContains(t, text, "report_internal_issue(",
 		"the operator already told the agent at turn 0 not to report a spawn-time verdict")
 	require.Contains(t, text, "Do NOT call report_internal_issue")
