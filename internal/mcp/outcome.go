@@ -139,7 +139,7 @@ var outcomeSchemas = map[string]json.RawMessage{
 // corrects the obvious misreading of a verdict enum - that the agent is picking
 // a forge review event. It is not.
 var outcomeDescriptions = map[string]string{
-	"implement":     "Finish this implement turn. Five actions. action=approved reports that you have the go-ahead on the plan you wrote: always set reason and plan_note_id, plus approving_maintainer AND approval_citations when a human comment is the go-ahead (omit both only when tatara proposed this issue itself and nobody has commented). The operator re-reads the cited comment and refuses if the citation does not hold up - a refusal is a normal result, not an error, and you keep talking. action=discuss holds the conversation open with a reason. action=rejected closes the issue with a reason. action=submitted opens the MR with the title, body and change_significance you own (plus merge_order when this task's MRs span more than one repo). action=declined declines the work with a decline_reason. This is the only way an implement task terminates.",
+	"implement":     "Finish this implement turn. Five actions. action=approved reports that you have the go-ahead on the plan you wrote: always set reason and plan_note_id, plus approving_maintainer AND approval_citations when a human comment is the go-ahead (omit both only when tatara proposed this issue itself and nobody has commented). The operator re-reads the cited comment and refuses if the citation does not hold up - a refusal is a normal result, not an error, and you keep talking. Read `granted` on the reply: until it is true, mr_write(action=open) and action=submitted are BOTH refused, so any code you write first is lost. Every answer carries `guidance` naming your next step; an auto-approved issue with no human comment is additionally capped at the project's auto-approve significance ceiling, enforced at action=submitted. action=discuss holds the conversation open with a reason. action=rejected closes the issue with a reason. action=submitted opens the MR with the title, body and change_significance you own (plus merge_order when this task's MRs span more than one repo); if it is refused with reason=approval-required the task is moved BACK to refined, so re-win the gate with action=approved before re-sending the same title/body/change_significance - re-sending it first earns the same refusal, naming action=approved. action=declined declines the work with a decline_reason. This is the only way an implement task terminates.",
 	"documentation": "Finish this documentation task. action=submitted with the MR title, the MR body and the change_significance you own (plus merge_order when this task's MRs span more than one repo), action=declined with a decline_reason, or action=discuss with a reason to pause and hold the conversation open instead of forcing submitted or declined this turn. This is the only way a documentation task terminates (discuss does not terminate it - it parks awaiting a human).",
 	"review":        "Submit your review verdict. verdict=approve does NOT post an approving review and verdict=request_changes does NOT post a REQUEST_CHANGES review - GitHub 422s a self-authored PR for both events, and this platform has one bot identity. You do not choose a forge review event and you never post a review yourself: the operator posts a COMMENT review carrying your verdict and findings, under the bot identity, from this payload. On verdict=approve the operator then merges - the merge is the approval of record.",
 	"brainstorm":    "Finish this brainstorm task. action=propose with 1 to 5 issue proposals, action=skip with a reason when nothing is worth proposing THIS cycle (transient - expect something the next session), or action=exhausted with a reason when nothing is worth proposing until the project itself changes (PAUSES brainstorming for this project until it does - use sparingly, only when you genuinely mean for scheduling to hold). A silent finish is not allowed.",
@@ -370,18 +370,24 @@ func validateImplementOutcome(a map[string]any) error {
 // checkApprovalPairing enforces the ONE thing the cli can know about who
 // approved: approving_maintainer and approval_citations travel together.
 //
-// Both present is a human-cited approval. NEITHER present is the
-// autoApproveTataraProposals carve-out, where the operator grants on provenance
-// alone - a tatara-proposed issue that no human has commented on - and stamps
-// the sentinel login "<tatara:auto>" with an empty CommentID. There is no
-// comment author on that path, so there is no maintainer login to declare, and
-// requiring one here would make the carve-out unreachable.
+// Both present is a human-cited approval. NEITHER present is the auto-approve
+// carve-out, where the operator grants on provenance alone - a tatara-proposed
+// issue that no human has commented on - and stamps the sentinel login
+// "<tatara:auto>" with an empty CommentID. There is no comment author on that
+// path, so there is no maintainer login to declare, and requiring one here would
+// make the carve-out unreachable.
 //
 // Neither field is required, for the same reason approval_citations never was:
-// WHETHER auto-approve applies depends on the project flag, the provenance
-// marker and a mirror-vs-Spec hash comparison, none of which the cli can see.
-// The cli enforces SHAPE; the operator is the trust boundary and refuses with a
-// 200 + granted=false when the shape is fine but the authorisation is not.
+// WHETHER auto-approve applies depends on the project's
+// autoApproveMaxSignificance ceiling, the provenance marker and a mirror-vs-Spec
+// hash comparison, none of which the cli can see. The cli enforces SHAPE; the
+// operator is the trust boundary and refuses with a 200 + granted=false when the
+// shape is fine but the authorisation is not.
+//
+// THAT GRANT IS ALSO PROVISIONAL and the cli cannot see that either
+// (tatara-operator#639): an auto-approved issue ships only up to the project's
+// ceiling, re-checked against change_significance at action=submitted. Another
+// reason the shape check here stops at the pair.
 //
 // Half-populated is refused here because it is wrong on every path and would
 // otherwise land as an operator-side approver-mismatch: a declared login with no
