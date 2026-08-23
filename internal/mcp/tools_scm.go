@@ -165,7 +165,7 @@ func SCMTools() []Tool {
 		},
 		{
 			Name:        "mr_write",
-			Description: "Open a merge request, or comment/reply on one. action=open is SYNCHRONOUS: the response returns the MR number, url, and existing (true if you already opened one for this task). action=comment and action=reply are DEFERRED: this call returns a 200 ack with no comment id - a reconciler posts to the forge, and the resulting comment appears in the next task_context read.",
+			Description: "Open a merge request, or comment/reply on one. action=open is SYNCHRONOUS: the response returns the MR number, url, and existing (true if you already opened one for this task). On an implement task it is REFUSED with reason=approval-required until every live issue the task owns has passed the gate via submit_outcome(action=approved); the refusal names each blocking issue and what it needs. action=comment and action=reply are DEFERRED: this call returns a 200 ack with no comment id - a reconciler posts to the forge, and the resulting comment appears in the next task_context read.",
 			Target:      TargetOperator,
 			Schema: json.RawMessage(`{"type":"object","properties":{
   "action":{"type":"string","enum":["open","comment","reply"]},

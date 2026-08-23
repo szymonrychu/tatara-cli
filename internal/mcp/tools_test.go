@@ -794,3 +794,51 @@ func TestInvoke_PRNotReadyGuidanceNamesTheJudgedHead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "aaa111", "guidance must name the head the operator judged")
 }
+
+// TestInvoke_ApprovalRequiredRendersAsGuidanceNotAToolError pins the third
+// recognised refusal (tatara-operator#639). mr_write(action=open) and
+// submit_outcome(action=submitted) now refuse 409 reason="approval-required"
+// when a live issue the task owns has not passed the implement gate.
+//
+// IT IS NOT A TOOL ERROR. The agent's next step is a maintainer comment or an
+// action=approved call, both of which it can pursue in the same session; a hard
+// error reads as a dead end and burns the turn. Blocked entries are ISSUES, so
+// they render `repo#number`, not the `repo!number` merge-request form
+// pr-not-ready uses.
+func TestInvoke_ApprovalRequiredRendersAsGuidanceNotAToolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"approval-required","error":"not approved","message":"mr_write(action=open) is refused: 1 issue(s) this task owns have not passed the implement gate.","blocked":[
+			{"repo":"tatara-operator","number":639,"detail":"needs-maintainer-comment","guidance":"No maintainer has commented on this issue, so there is nothing to cite."}
+		]}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err, "approval-required 409 must not surface as a tool error")
+	assert.Contains(t, string(body), "have not passed the implement gate")
+	assert.Contains(t, string(body), "tatara-operator#639", "guidance must name the blocking ISSUE, not a merge request")
+	assert.Contains(t, string(body), "needs-maintainer-comment")
+	assert.Contains(t, string(body), "No maintainer has commented",
+		"the operator's per-issue guidance is the actionable part and must reach the agent verbatim")
+}
+
+// The operator owns this vocabulary; the cli must not hold a second copy of it.
+// An unknown detail with guidance still renders, so a new blocker the operator
+// adds needs no cli release.
+func TestInvoke_ApprovalRequiredRendersADetailThisCliDoesNotKnow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"approval-required","error":"e","message":"m","blocked":[
+			{"repo":"r","number":1,"detail":"some-future-blocker","guidance":"do the new thing"}
+		]}`))
+	}))
+	defer srv.Close()
+	c := freshClient(t, srv.URL)
+	tool := toolByName(t, MemoryTools(), "memory_write")
+	body, err := Invoke(context.Background(), c, tool, map[string]any{"text": "x"})
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "some-future-blocker")
+	assert.Contains(t, string(body), "do the new thing")
+}

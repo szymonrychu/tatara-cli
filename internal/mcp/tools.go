@@ -366,6 +366,9 @@ const errBodyCap = 4096
 //   - "pr-not-ready" (see internal/restapi/readiness.go prNotReadyResponse):
 //     the message plus one line per blocked MR naming repo, number and
 //     blockers.
+//   - "approval-required" (see internal/restapi/approval_ship.go, #639): the
+//     message plus one line per blocked ISSUE naming repo, number, the blocking
+//     detail and the operator's own remedy sentence.
 //
 // Any other reason - including no reason at all - returns ok=false, so it
 // stays a hard tool error. This carve-out is a CLOSED list, not a catch-all:
@@ -382,6 +385,11 @@ func refusalGuidance(body []byte) (string, bool) {
 			HeadSHA  string   `json:"headSHA"`
 			Blockers []string `json:"blockers"`
 			Detail   string   `json:"detail"`
+			// Guidance is the approval-required renderer's payload and the
+			// reason this cli holds no copy of the blocker vocabulary: the
+			// operator is the trust boundary and it writes the remedy, so a
+			// blocker it adds later renders here with no cli release.
+			Guidance string `json:"guidance"`
 		} `json:"blocked"`
 	}
 	if json.Unmarshal(body, &r) != nil {
@@ -407,6 +415,18 @@ func refusalGuidance(body []byte) (string, bool) {
 				ref += "@" + m.HeadSHA
 			}
 			msg += fmt.Sprintf("\n\n%s [%s]: %s", ref, strings.Join(m.Blockers, ","), m.Detail)
+		}
+		return msg, true
+	case "approval-required":
+		// BLOCKED ENTRIES ARE ISSUES HERE, not merge requests, so they render
+		// `repo#number` rather than pr-not-ready's `repo!number`. Getting that
+		// sigil wrong sends the agent to look for a PR that does not exist.
+		msg := r.Message
+		for _, b := range r.Blocked {
+			msg += fmt.Sprintf("\n\n%s#%d [%s]", b.Repo, b.Number, b.Detail)
+			if b.Guidance != "" {
+				msg += ": " + b.Guidance
+			}
 		}
 		return msg, true
 	default:
