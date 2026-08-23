@@ -44,6 +44,12 @@ func countingBackend(t *testing.T, status int, body string) (*httptest.Server, *
 // that tatara-memory is unhealthy but the agent must run anyway. Every memory
 // tool then answers with the guidance instead of burning a request timeout on
 // a backend the platform already knows is down.
+//
+// It must NOT ask for a report_internal_issue. The operator already told the
+// agent at turn 0, in promptguidance.MemoryDegradedGuidance, not to report this
+// exact condition (tatara-operator#523); the tool layer instructing the
+// opposite manufactures one duplicate platform-problem alert per turn and
+// contradicts the prompt on the way.
 func TestCallTool_DegradedEnvReturnsGuidanceWithoutCallingBackend(t *testing.T) {
 	t.Setenv(memoryDegradedEnv, "true")
 	backend, hits := countingBackend(t, http.StatusOK, `{"ok":true}`)
@@ -58,8 +64,88 @@ func TestCallTool_DegradedEnvReturnsGuidanceWithoutCallingBackend(t *testing.T) 
 	text := resultText(t, res)
 	require.Contains(t, text, "MEMORY_DEGRADED")
 	require.Contains(t, text, "Proceed WITHOUT recall")
-	require.Contains(t, text, `offending_tool="memory_query"`)
+	// This is the only positive assertion on the DEGRADED arm's reason text, and
+	// it is load-bearing for a test in the other direction: the disabled case
+	// asserts NotContains("flagged it unhealthy") to prove it did not fall
+	// through to this arm. Reword the reason with nothing pinning it and that
+	// assertion starts passing unconditionally - including with the switch order
+	// in newMemoryState reverted, which is the exact bug review caught once here.
+	require.Contains(t, text, "flagged it unhealthy")
+	require.NotContains(t, text, "report_internal_issue(",
+		"the operator already told the agent at turn 0 not to report a spawn-time verdict")
+	require.Contains(t, text, "Do NOT call report_internal_issue")
 	require.Equal(t, int32(0), atomic.LoadInt32(hits), "a known-degraded backend must not be called")
+}
+
+// TATARA_MEMORY_DISABLED=true is a project configured without memory, not an
+// outage. The reason must say so - "the platform flagged it unhealthy" sends an
+// incident agent chasing a memory failure that does not exist - and the
+// guidance must not ask for a report either, mirroring the operator's
+// MemoryDisabledGuidance.
+//
+// The nil-client case is the one that actually happens: disabling memory clears
+// Project.status.memory.endpoint, so the pod gets TATARA_MEMORY_URL="" and cmd
+// wires no memory client at all. The disabled arm has to be reached even then,
+// or it is dead code and the agent reads "your pod is misconfigured" on a
+// project that is working exactly as configured.
+func TestCallTool_MemoryDisabledIsNotReportedAsAFault(t *testing.T) {
+	cases := []struct {
+		name   string
+		memory bool // a memory client resolved
+	}{
+		{"no endpoint, the steady state on a disabled project", false},
+		{"endpoint still set, the spec-vs-status skew window", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(memoryDegradedEnv, "true")
+			t.Setenv(memoryDisabledEnv, "true")
+			backend, hits := countingBackend(t, http.StatusOK, `{"ok":true}`)
+
+			var memory *client.Client
+			if tc.memory {
+				memory = freshClient(t, backend.URL)
+			}
+			srv := NewServer(memory, freshClient(t, backend.URL), discardLogger(), "brainstorm")
+			ctx := context.Background()
+			cli := startClient(ctx, t, srv)
+
+			res := callTool(ctx, t, cli, "memory_query", map[string]any{"mode": "hybrid", "text": "anything"})
+			require.False(t, res.IsError)
+
+			text := resultText(t, res)
+			require.Contains(t, text, "MEMORY_DEGRADED", "the prefix is load-bearing for skills matching on it")
+			require.Contains(t, text, "configured without memory")
+			require.NotContains(t, text, "flagged it unhealthy",
+				"a deliberately disabled project was never flagged unhealthy")
+			require.NotContains(t, text, "TATARA_MEMORY_URL is set but empty",
+				"an empty endpoint is the CONSEQUENCE of disabling memory, not a misconfiguration to report")
+			require.NotContains(t, text, "report_internal_issue(")
+			require.Equal(t, int32(0), atomic.LoadInt32(hits))
+		})
+	}
+}
+
+// The mid-turn latch is the ONE case turn-0 guidance never covers: the operator
+// said healthy at spawn and the backend died afterwards, so nothing upstream
+// knows yet. That path keeps the report_internal_issue instruction - it is the
+// case the instruction was written for.
+func TestCallTool_LatchedOutageStillAsksForOneReport(t *testing.T) {
+	t.Setenv(memoryDegradedEnv, "false")
+	t.Setenv(memoryDisabledEnv, "false")
+	backend, _ := countingBackend(t, http.StatusInternalServerError, `{"error":"boom"}`)
+
+	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm")
+	ctx := context.Background()
+	cli := startClient(ctx, t, srv)
+
+	res := callTool(ctx, t, cli, "memory_query", map[string]any{"mode": "hybrid", "text": "anything"})
+	require.False(t, res.IsError)
+
+	text := resultText(t, res)
+	require.Contains(t, text, "MEMORY_DEGRADED")
+	require.Contains(t, text, `report_internal_issue(category="tool_error", offending_tool="memory_query"`)
+	require.Contains(t, text, "ONCE this turn")
 }
 
 // Every one of the nine TargetMemory tools must answer the same way; a code_*
@@ -195,6 +281,11 @@ func TestCallTool_NoMemoryClientConfiguredIsDegraded(t *testing.T) {
 	text := resultText(t, res)
 	require.Contains(t, text, "MEMORY_DEGRADED")
 	require.Contains(t, text, "TATARA_MEMORY_URL")
+	// An empty endpoint with memory neither disabled nor flagged degraded is the
+	// one spawn-time state nobody upstream has a name for: no turn-0 guidance
+	// covers it, and off-pod there may be no operator at all. It keeps the
+	// report instruction the other two arms drop.
+	require.Contains(t, text, `report_internal_issue(category="tool_error", offending_tool="memory_query"`)
 }
 
 // The tool surface stays stable when memory is degraded: the nine memory tools
