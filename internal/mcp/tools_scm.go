@@ -9,19 +9,22 @@ import (
 	"strings"
 )
 
-// scmNumber renders the "number" arg as a decimal string for query/body use.
+// scmInt renders an integer-ish arg as a decimal string for query/body use.
 // argString only handles string/float64 (real JSON-RPC args always decode as
 // float64); asInt additionally accepts a bare Go int, so both representations
-// resolve to the same wire value.
-func scmNumber(a map[string]any) string {
-	if s := argString(a, "number"); s != "" {
+// resolve to the same wire value. since_days used to reach the query through a
+// bare argString, which dropped it for an in-process caller passing a Go int.
+func scmInt(a map[string]any, key string) string {
+	if s := argString(a, key); s != "" {
 		return s
 	}
-	if n, err := asInt(a["number"]); err == nil {
+	if n, err := asInt(a[key]); err == nil {
 		return strconv.Itoa(n)
 	}
 	return ""
 }
+
+func scmNumber(a map[string]any) string { return scmInt(a, "number") }
 
 // SCMTools returns the 4 forge tools (contract D.2). The agent pod has NO forge
 // token and gh/glab are banned; these are its only view of, and only voice on,
@@ -43,10 +46,10 @@ func SCMTools() []Tool {
   "is_pr":{"type":"boolean","description":"kind=comments only: read the MR thread instead of the issue thread."},
   "state":{"type":"string","enum":["open","closed","merged","all"],
     "description":"kind=issues (open|closed|all) and kind=mr (open|merged|closed|all)."},
-  "since":{"type":"string","description":"kind=issues|mr only. RFC3339."},
+  "since":{"type":"string","description":"kind=issues|mr only. RFC3339. Compared against the forge's updatedAt, so it selects issues and merge requests with activity since that instant - not the mirror's last refresh."},
   "labels":{"type":"string","description":"kind=issues only. Comma-separated."},
   "since_days":{"type":"integer","description":"kind=commits only. Default 30."},
-  "limit":{"type":"integer"}},
+  "limit":{"type":"integer","description":"Selects the NEWEST N by number (kind=issues|mr default 100, max 500), not the oldest."}},
  "required":["kind","repo"],"additionalProperties":false}`),
 			Build: func(a map[string]any) (string, string, any, error) {
 				kind := argString(a, "kind")
@@ -77,7 +80,7 @@ func SCMTools() []Tool {
 					addOptional(q, a, "state", "since", "labels", "limit")
 				case "mr":
 					subpath = "mrs"
-					addOptional(q, a, "state", "limit")
+					addOptional(q, a, "state", "since", "limit")
 				case "comments":
 					subpath = "comments"
 					q.Set("number", scmNumber(a))
@@ -86,7 +89,7 @@ func SCMTools() []Tool {
 					}
 				case "commits":
 					subpath = "commits"
-					if v := argString(a, "since_days"); v != "" {
+					if v := scmInt(a, "since_days"); v != "" {
 						q.Set("sinceDays", v)
 					}
 					addOptional(q, a, "limit")

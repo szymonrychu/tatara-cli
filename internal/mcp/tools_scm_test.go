@@ -77,6 +77,61 @@ func TestSCMRead_NumberRequiredForCIAndComments(t *testing.T) {
 	}
 }
 
+// TestSCMRead_EveryAdvertisedArgReachesTheQuery is the cli half of the
+// operator's scm_read parameter table (tatara-operator#636). `since` was
+// advertised for kind=issues|mr and forwarded for issues only, so an agent
+// asking for recent merge requests got the whole list, oldest-first.
+//
+// Two args are spelled differently on the wire: since_days -> sinceDays and
+// is_pr -> isPR. Integers are passed as Go ints here, which is the shape
+// argString does NOT handle - a bespoke coercion path is how since_days came
+// to be droppable.
+func TestSCMRead_EveryAdvertisedArgReachesTheQuery(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "tatara")
+	tl := toolByName(t, SCMTools(), "scm_read")
+	for _, tc := range []struct {
+		kind, arg string
+		value     any
+		want      string
+	}{
+		{"issues", "state", "closed", "state=closed"},
+		{"issues", "since", "2026-08-20T00:00:00Z", "since=2026-08-20T00%3A00%3A00Z"},
+		{"issues", "labels", "bug", "labels=bug"},
+		{"issues", "limit", 5, "limit=5"},
+		{"mr", "state", "merged", "state=merged"},
+		{"mr", "since", "2026-08-20T00:00:00Z", "since=2026-08-20T00%3A00%3A00Z"},
+		{"mr", "limit", 5, "limit=5"},
+		{"comments", "is_pr", true, "isPR=true"},
+		{"commits", "since_days", 7, "sinceDays=7"},
+		{"commits", "limit", 5, "limit=5"},
+	} {
+		t.Run(tc.kind+"/"+tc.arg, func(t *testing.T) {
+			args := map[string]any{"kind": tc.kind, "repo": "tatara-operator", tc.arg: tc.value}
+			if tc.kind == "ci" || tc.kind == "comments" {
+				args["number"] = 291
+			}
+			_, path, _, err := tl.Build(args)
+			require.NoError(t, err)
+			require.Contains(t, path, tc.want,
+				"scm_read advertises %q for kind=%s and Build drops it", tc.arg, tc.kind)
+		})
+	}
+}
+
+// The schema description is the only place an agent learns that limit takes the
+// NEWEST N and that since compares against the forge's updatedAt.
+func TestSCMRead_SchemaDocumentsSinceAndLimitSemantics(t *testing.T) {
+	tl := toolByName(t, SCMTools(), "scm_read")
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+	require.Contains(t, schema.Properties["since"].Description, "updatedAt")
+	require.Contains(t, schema.Properties["limit"].Description, "NEWEST")
+}
+
 func TestIssueWrite_HasNoStatusAndNoLabelsParam(t *testing.T) {
 	tl := toolByName(t, SCMTools(), "issue_write")
 	var schema struct {
