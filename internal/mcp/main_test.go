@@ -16,8 +16,9 @@ import (
 //
 // TATARA_TURN_ID and RUN_ID are read one package over, in
 // internal/client.correlationID(), which every freshClient() in this suite
-// constructs; TestPackageEnvReadsAreNeutralised's in-package AST scan cannot
-// see them, so they are listed here by hand.
+// constructs. They are covered by the guard only because scannedDirs in
+// hermetic_test.go carries "../client" for them; drop that entry and these two
+// stop being enforced.
 var injectedEnvNeutralised = []string{
 	"TATARA_MEMORY_DEGRADED",
 	"TATARA_MEMORY_DISABLED",
