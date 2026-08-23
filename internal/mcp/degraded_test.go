@@ -75,25 +75,48 @@ func TestCallTool_DegradedEnvReturnsGuidanceWithoutCallingBackend(t *testing.T) 
 // incident agent chasing a memory failure that does not exist - and the
 // guidance must not ask for a report either, mirroring the operator's
 // MemoryDisabledGuidance.
+//
+// The nil-client case is the one that actually happens: disabling memory clears
+// Project.status.memory.endpoint, so the pod gets TATARA_MEMORY_URL="" and cmd
+// wires no memory client at all. The disabled arm has to be reached even then,
+// or it is dead code and the agent reads "your pod is misconfigured" on a
+// project that is working exactly as configured.
 func TestCallTool_MemoryDisabledIsNotReportedAsAFault(t *testing.T) {
-	t.Setenv(memoryDegradedEnv, "true")
-	t.Setenv(memoryDisabledEnv, "true")
-	backend, hits := countingBackend(t, http.StatusOK, `{"ok":true}`)
+	cases := []struct {
+		name   string
+		memory bool // a memory client resolved
+	}{
+		{"no endpoint, the steady state on a disabled project", false},
+		{"endpoint still set, the spec-vs-status skew window", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(memoryDegradedEnv, "true")
+			t.Setenv(memoryDisabledEnv, "true")
+			backend, hits := countingBackend(t, http.StatusOK, `{"ok":true}`)
 
-	srv := NewServer(freshClient(t, backend.URL), freshClient(t, backend.URL), discardLogger(), "brainstorm")
-	ctx := context.Background()
-	cli := startClient(ctx, t, srv)
+			var memory *client.Client
+			if tc.memory {
+				memory = freshClient(t, backend.URL)
+			}
+			srv := NewServer(memory, freshClient(t, backend.URL), discardLogger(), "brainstorm")
+			ctx := context.Background()
+			cli := startClient(ctx, t, srv)
 
-	res := callTool(ctx, t, cli, "memory_query", map[string]any{"mode": "hybrid", "text": "anything"})
-	require.False(t, res.IsError)
+			res := callTool(ctx, t, cli, "memory_query", map[string]any{"mode": "hybrid", "text": "anything"})
+			require.False(t, res.IsError)
 
-	text := resultText(t, res)
-	require.Contains(t, text, "MEMORY_DEGRADED", "the prefix is load-bearing for skills matching on it")
-	require.Contains(t, text, "configured without memory")
-	require.NotContains(t, text, "flagged it unhealthy",
-		"a deliberately disabled project was never flagged unhealthy")
-	require.NotContains(t, text, "report_internal_issue(")
-	require.Equal(t, int32(0), atomic.LoadInt32(hits))
+			text := resultText(t, res)
+			require.Contains(t, text, "MEMORY_DEGRADED", "the prefix is load-bearing for skills matching on it")
+			require.Contains(t, text, "configured without memory")
+			require.NotContains(t, text, "flagged it unhealthy",
+				"a deliberately disabled project was never flagged unhealthy")
+			require.NotContains(t, text, "TATARA_MEMORY_URL is set but empty",
+				"an empty endpoint is the CONSEQUENCE of disabling memory, not a misconfiguration to report")
+			require.NotContains(t, text, "report_internal_issue(")
+			require.Equal(t, int32(0), atomic.LoadInt32(hits))
+		})
+	}
 }
 
 // The mid-turn latch is the ONE case turn-0 guidance never covers: the operator
@@ -251,6 +274,11 @@ func TestCallTool_NoMemoryClientConfiguredIsDegraded(t *testing.T) {
 	text := resultText(t, res)
 	require.Contains(t, text, "MEMORY_DEGRADED")
 	require.Contains(t, text, "TATARA_MEMORY_URL")
+	// An empty endpoint with memory neither disabled nor flagged degraded is the
+	// one spawn-time state nobody upstream has a name for: no turn-0 guidance
+	// covers it, and off-pod there may be no operator at all. It keeps the
+	// report instruction the other two arms drop.
+	require.Contains(t, text, `report_internal_issue(category="tool_error", offending_tool="memory_query"`)
 }
 
 // The tool surface stays stable when memory is degraded: the nine memory tools

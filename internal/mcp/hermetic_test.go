@@ -24,10 +24,21 @@ import (
 // line; missing one the operator added costs a package that goes non-hermetic
 // again, which is why the list is deliberately the whole surface rather than
 // the subset this package happens to read today.
+//
+// Names reached through a Go constant in pod.go (EnvAgentPodTTLSeconds,
+// EnvTurnTimeoutSeconds) and the secretEnv/SecretKeyRef block are included by
+// hand: grepping pod.go for `Name: "..."` misses both, which is how the first
+// draft of this list lost six of them.
 var injectedByTheAgentRuntime = []string{
+	"AGENT_POD_TTL_SECONDS",
+	"CALLBACK_HMAC_SECRET",
 	"CHECKOUT_BRANCH",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"CLI_OIDC_CLIENT_ID",
+	"CLI_OIDC_CLIENT_SECRET",
 	"DEFAULT_CALLBACK_URL",
 	"EFFORT",
+	"GIT_TOKEN",
 	"GIT_USER_EMAIL",
 	"GIT_USER_NAME",
 	"MISE_ALWAYS_KEEP_DOWNLOAD",
@@ -44,6 +55,7 @@ var injectedByTheAgentRuntime = []string{
 	"TATARA_CONTRACT_VERSION",
 	"TATARA_EXTRA_MCP_SERVERS",
 	"TATARA_EXTRA_SKILL_SOURCES",
+	"TATARA_GRAFANA_MCP_URL",
 	"TATARA_KIND",
 	"TATARA_MEMORY_DEGRADED",
 	"TATARA_MEMORY_DISABLED",
@@ -62,8 +74,18 @@ var injectedByTheAgentRuntime = []string{
 	"TATARA_TASK",
 	"TATARA_TOOL_PROFILE",
 	"TATARA_TURN_ID",
+	"TURN_TIMEOUT_SECONDS",
 	"TATARA_WORKSPACE_FULL_CLONE",
 }
+
+// scannedDirs are the package directories whose env reads decide whether THIS
+// package's tests are hermetic. internal/client is in the list because this
+// package's production code imports it and its correlationID() reads
+// TATARA_TURN_ID and RUN_ID on every client construction - a read that is
+// invisible from internal/mcp alone. Without it the guard would stay green
+// while a new read one package over quietly re-broke the suite, which is the
+// exact shape of the bug it exists to prevent.
+var scannedDirs = []string{".", "../client"}
 
 // TestPackageEnvReadsAreNeutralised is the guard the previous two rounds of
 // this bug did not have. Making the suite hermetic once fixes today; it does
@@ -88,36 +110,38 @@ func TestPackageEnvReadsAreNeutralised(t *testing.T) {
 		neutralised[k] = true
 	}
 
-	entries, err := os.ReadDir(".")
-	require.NoError(t, err)
-
 	fset := token.NewFileSet()
 	var scanned int
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		require.NoError(t, err, "parsing %s", name)
-		scanned++
+	for _, dir := range scannedDirs {
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err, "reading %s", dir)
 
-		ast.Inspect(f, func(n ast.Node) bool {
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
 			}
-			v, err := strconv.Unquote(lit.Value)
-			if err != nil || !injected[v] {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+			require.NoError(t, err, "parsing %s", name)
+			scanned++
+
+			ast.Inspect(f, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				v, err := strconv.Unquote(lit.Value)
+				if err != nil || !injected[v] {
+					return true
+				}
+				require.True(t, neutralised[v],
+					"%s names the agent-runtime-injected %s, but injectedEnvNeutralised in main_test.go "+
+						"does not clear it: this package's tests are not hermetic in an agent pod. "+
+						"Add it there, or confirm the literal is not an env read.",
+					fset.Position(lit.Pos()), v)
 				return true
-			}
-			require.True(t, neutralised[v],
-				"%s names the agent-runtime-injected %s, but injectedEnvNeutralised in main_test.go "+
-					"does not clear it: this package's tests are not hermetic in an agent pod. "+
-					"Add it there, or confirm the literal is not an env read.",
-				fset.Position(lit.Pos()), v)
-			return true
-		})
+			})
+		}
 	}
 	require.NotZero(t, scanned, "the scan found no production files; it would pass vacuously")
 }

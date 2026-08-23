@@ -56,8 +56,11 @@ const knownGuidance = guidanceHead +
 // shortGuidance answers every later occurrence. One outage hits every memory
 // tool the agent tries; repeating the full paragraph each time would flood the
 // transcript and drown the work the agent is supposed to carry on with.
+// It says "no further report" rather than "do not report it AGAIN", because on
+// an upstream verdict the first occurrence told the agent not to report at all,
+// and "again" would imply it had.
 const shortGuidance = "MEMORY_DEGRADED (see earlier): tatara-memory is still unavailable (%s). " +
-	"Proceed without recall; do not report it again."
+	"Proceed without recall; no further report or retry is needed."
 
 // memoryState tracks whether tatara-memory is usable for the life of this
 // process (one process = one agent turn). It has two entry points: the
@@ -74,22 +77,31 @@ type memoryState struct {
 // memory base URL resolved at all (TATARA_MEMORY_URL set but empty), in which
 // case there is no client to call and the pod is degraded from the start.
 //
-// Every arm here is a condition the operator decided and already stated at turn
-// 0, so all three set upstream: the agent must be told to proceed, not to
-// report. The disabled arm is checked before the degraded one because both are
-// true on a project configured without memory, and only the disabled wording is
-// true - that project was never "flagged unhealthy".
+// Order matters, and it is the reverse of what reads naturally. Disabling
+// memory on a Project clears status.memory.endpoint, so a disabled project
+// arrives here with ALL THREE conditions true: no endpoint, DISABLED=true and
+// DEGRADED=true. Testing !configured first would make the other two arms dead
+// code in the only state they exist for, and tell the agent its pod is
+// misconfigured on a project that is behaving exactly as configured.
+//
+// The two env arms are conditions the operator decided and already stated at
+// turn 0 (promptguidance.MemoryDisabledGuidance / MemoryDegradedGuidance), so
+// they set upstream and the agent is told not to report. !configured does NOT:
+// an endpoint that is empty while memory is neither disabled nor flagged
+// unhealthy is a state nothing upstream has named, and off-pod there is no
+// operator to have named it. That one keeps the report instruction.
 func newMemoryState(configured bool) *memoryState {
 	s := &memoryState{}
 	switch {
-	case !configured:
-		s.reason = "no memory backend is configured for this pod: TATARA_MEMORY_URL is set but empty"
 	case os.Getenv(memoryDisabledEnv) == "true":
 		s.reason = "this project is configured without memory (" + memoryDisabledEnv + "=true)"
+		s.upstream = true
 	case os.Getenv(memoryDegradedEnv) == "true":
 		s.reason = "the platform flagged it unhealthy when this pod started (" + memoryDegradedEnv + "=true)"
+		s.upstream = true
+	case !configured:
+		s.reason = "no memory backend is configured for this pod: TATARA_MEMORY_URL is set but empty"
 	}
-	s.upstream = s.reason != ""
 	return s
 }
 
