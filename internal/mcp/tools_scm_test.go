@@ -77,19 +77,25 @@ func TestSCMRead_NumberRequiredForCIAndComments(t *testing.T) {
 	}
 }
 
-// TestSCMRead_EveryAdvertisedArgReachesTheQuery is the cli half of the
-// operator's scm_read parameter table (tatara-operator#636). `since` was
-// advertised for kind=issues|mr and forwarded for issues only, so an agent
-// asking for recent merge requests got the whole list, oldest-first.
+// scmAdvertisedArgs pins ONE optional schema arg of scm_read to the query
+// parameter Build must produce for it. It is the cli half of the operator's
+// scm_read parameter table (tatara-operator#636). `since` was advertised for
+// kind=issues|mr and forwarded for issues only, so an agent asking for recent
+// merge requests got the whole list, oldest-first.
 //
 // Two args are spelled differently on the wire: since_days -> sinceDays and
 // is_pr -> isPR. Integers are passed as Go ints here, which is the shape
 // argString does NOT handle - a bespoke coercion path is how since_days came
 // to be droppable.
-func TestSCMRead_EveryAdvertisedArgReachesTheQuery(t *testing.T) {
-	t.Setenv("TATARA_PROJECT", "tatara")
-	tl := toolByName(t, SCMTools(), "scm_read")
-	for _, tc := range []struct {
+//
+// The table is hand-written, so its COMPLETENESS is pinned separately, against
+// the schema literal itself: see TestSCMRead_ArgTableCoversEveryOptionalSchemaProperty.
+func scmAdvertisedArgs() []struct {
+	kind, arg string
+	value     any
+	want      string
+} {
+	return []struct {
 		kind, arg string
 		value     any
 		want      string
@@ -104,7 +110,13 @@ func TestSCMRead_EveryAdvertisedArgReachesTheQuery(t *testing.T) {
 		{"comments", "is_pr", true, "isPR=true"},
 		{"commits", "since_days", 7, "sinceDays=7"},
 		{"commits", "limit", 5, "limit=5"},
-	} {
+	}
+}
+
+func TestSCMRead_EveryAdvertisedArgReachesTheQuery(t *testing.T) {
+	t.Setenv("TATARA_PROJECT", "tatara")
+	tl := toolByName(t, SCMTools(), "scm_read")
+	for _, tc := range scmAdvertisedArgs() {
 		t.Run(tc.kind+"/"+tc.arg, func(t *testing.T) {
 			args := map[string]any{"kind": tc.kind, "repo": "tatara-operator", tc.arg: tc.value}
 			if tc.kind == "ci" || tc.kind == "comments" {
@@ -115,6 +127,43 @@ func TestSCMRead_EveryAdvertisedArgReachesTheQuery(t *testing.T) {
 			require.Contains(t, path, tc.want,
 				"scm_read advertises %q for kind=%s and Build drops it", tc.arg, tc.kind)
 		})
+	}
+}
+
+// scmReadStructuralArgs are the scm_read schema properties that are NOT per-kind
+// optionals, so they are not table rows: kind and repo are required and pinned by
+// TestSCMRead_KindPathMap / TestSCMRead_RepoIsRequiredOnEveryKind, project is
+// resolved from TATARA_PROJECT, and number is pinned by
+// TestSCMRead_NumberRequiredForCIAndComments.
+var scmReadStructuralArgs = map[string]bool{"kind": true, "repo": true, "project": true, "number": true}
+
+// A hand-written table only pins the args someone remembered to list: adding
+// `author` to the schema and forgetting it in Build is `since`'s failure mode
+// verbatim. The schema literal is in-package here, so the completeness half is
+// reachable without a fetch or a cross-module import - unlike the operator's
+// mirror of this table, which pins its count instead.
+func TestSCMRead_ArgTableCoversEveryOptionalSchemaProperty(t *testing.T) {
+	tl := toolByName(t, SCMTools(), "scm_read")
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(tl.Schema, &schema))
+
+	covered := map[string]bool{}
+	for _, tc := range scmAdvertisedArgs() {
+		covered[tc.arg] = true
+	}
+	for name := range schema.Properties {
+		if scmReadStructuralArgs[name] {
+			continue
+		}
+		require.True(t, covered[name],
+			"scm_read advertises %q and scmAdvertisedArgs does not pin it: add a row, "+
+				"or add it to scmReadStructuralArgs if it is not a per-kind optional", name)
+	}
+	for arg := range covered {
+		require.Contains(t, schema.Properties, arg,
+			"scmAdvertisedArgs pins %q, which the scm_read schema no longer advertises", arg)
 	}
 }
 
