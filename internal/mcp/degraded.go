@@ -17,17 +17,41 @@ import (
 // a bare transport error.
 const memoryDegradedEnv = "TATARA_MEMORY_DEGRADED"
 
-// fullGuidance is emitted once per process, on the first memory tool call that
-// finds the subsystem down. It names the failing subsystem, says the condition
-// is known, tells the agent what to do instead, and asks for exactly one
-// report_internal_issue - description is included because that argument is
-// required and a guidance line that fails validation is worse than none.
-const fullGuidance = "MEMORY_DEGRADED: the tatara-memory subsystem is unavailable (%s). " +
+// memoryDisabledEnv is injected alongside memoryDegradedEnv and answers a
+// different question. DEGRADED answers "will the recall tools fail?" - yes,
+// either way. This one answers "is that a fault?", and when it is true the
+// answer is no: the project is configured without memory on purpose, so there
+// is nothing to report (tatara-operator#523).
+const memoryDisabledEnv = "TATARA_MEMORY_DISABLED"
+
+// guidanceHead opens both full forms. The "MEMORY_DEGRADED:" prefix is
+// load-bearing: skills and prompts match on that literal, so it stays byte
+// stable whichever tail follows it.
+const guidanceHead = "MEMORY_DEGRADED: the tatara-memory subsystem is unavailable (%s). " +
 	"This is a known platform condition, not a mistake in your request. " +
-	"Proceed WITHOUT recall - use Serena/LSP, git, and direct file reads instead. " +
+	"Proceed WITHOUT recall - use Serena/LSP, git, and direct file reads instead. "
+
+// guidanceTail closes both full forms.
+const guidanceTail = "State in your outcome that memory recall was unavailable, and complete your work."
+
+// fullGuidance is the mid-turn form: the operator said healthy at spawn and the
+// backend died afterwards, so nothing upstream knows yet and this process is
+// the only witness. It asks for exactly one report_internal_issue - description
+// is included because that argument is required and a guidance line that fails
+// validation is worse than none.
+const fullGuidance = guidanceHead +
 	"Call report_internal_issue(category=\"tool_error\", offending_tool=%q, " +
-	"description=\"tatara-memory unavailable\") ONCE this turn, state in your outcome " +
-	"that memory recall was unavailable, and complete your work."
+	"description=\"tatara-memory unavailable\") ONCE this turn. " + guidanceTail
+
+// knownGuidance is the spawn-time form: the verdict came from the operator,
+// which has already told the agent at turn 0 - in
+// promptguidance.MemoryDegradedGuidance and MemoryDisabledGuidance alike - not
+// to report this condition. Asking for a report here contradicts the prompt and
+// manufactures one duplicate platform-problem alert per turn
+// (tatara-operator#523).
+const knownGuidance = guidanceHead +
+	"Do NOT call report_internal_issue for this: the condition is already tracked upstream, " +
+	"so a report would only duplicate an alert that already exists. " + guidanceTail
 
 // shortGuidance answers every later occurrence. One outage hits every memory
 // tool the agent tries; repeating the full paragraph each time would flood the
@@ -42,20 +66,30 @@ const shortGuidance = "MEMORY_DEGRADED (see earlier): tatara-memory is still una
 type memoryState struct {
 	mu        sync.Mutex
 	reason    string // non-empty once memory is known unusable
+	upstream  bool   // the reason is the operator's spawn-time verdict, not our own latch
 	announced bool   // full guidance already emitted
 }
 
 // newMemoryState reads the spawn-time verdict. configured is false when no
 // memory base URL resolved at all (TATARA_MEMORY_URL set but empty), in which
 // case there is no client to call and the pod is degraded from the start.
+//
+// Every arm here is a condition the operator decided and already stated at turn
+// 0, so all three set upstream: the agent must be told to proceed, not to
+// report. The disabled arm is checked before the degraded one because both are
+// true on a project configured without memory, and only the disabled wording is
+// true - that project was never "flagged unhealthy".
 func newMemoryState(configured bool) *memoryState {
 	s := &memoryState{}
 	switch {
 	case !configured:
 		s.reason = "no memory backend is configured for this pod: TATARA_MEMORY_URL is set but empty"
+	case os.Getenv(memoryDisabledEnv) == "true":
+		s.reason = "this project is configured without memory (" + memoryDisabledEnv + "=true)"
 	case os.Getenv(memoryDegradedEnv) == "true":
 		s.reason = "the platform flagged it unhealthy when this pod started (" + memoryDegradedEnv + "=true)"
 	}
+	s.upstream = s.reason != ""
 	return s
 }
 
@@ -78,8 +112,10 @@ func (s *memoryState) latch(err error) string {
 	return s.reason
 }
 
-// report renders the agent-facing result for tool: the full guidance on the
-// first occurrence, the short form after that.
+// report renders the agent-facing result for tool: a full guidance on the first
+// occurrence, the short form after that. Which full form depends on who knows:
+// a spawn-time verdict is already alerted on upstream and must not be reported
+// again, a mid-turn latch is this process's own discovery and must be.
 func (s *memoryState) report(tool, reason string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,6 +123,9 @@ func (s *memoryState) report(tool, reason string) string {
 		return fmt.Sprintf(shortGuidance, reason)
 	}
 	s.announced = true
+	if s.upstream {
+		return fmt.Sprintf(knownGuidance, reason)
+	}
 	return fmt.Sprintf(fullGuidance, reason, tool)
 }
 
